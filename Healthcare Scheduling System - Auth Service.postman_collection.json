@@ -1,0 +1,298 @@
+{
+  "info": {
+    "_postman_id": "6b1638e8-f245-46d8-a8db-c776e72bc8f5",
+    "name": "Healthcare Scheduling System - Auth Service",
+    "description": "Collection for testing GraphQL and REST endpoints of Auth Service (Port 3001) in Healthcare Scheduling System.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "19025345",
+    "_collection_link": "https://go.postman.co/collection/19025345-6b1638e8-f245-46d8-a8db-c776e72bc8f5?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "GraphQL",
+      "item": [
+        {
+          "name": "1. Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseJson = pm.response.json();\nif (responseJson.data && responseJson.data.register && responseJson.data.register.accessToken) {\n    pm.collectionVariables.set('auth_token', responseJson.data.register.accessToken);\n    console.log('Saved auth_token from registration:', responseJson.data.register.accessToken);\n}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "mutation RegisterUser($input: RegisterInput!) {\n  register(input: $input) {\n    accessToken\n    user {\n      id\n      email\n      createdAt\n      updatedAt\n    }\n  }\n}",
+                "variables": "{\n  \"input\": {\n    \"email\": \"dr.fajar@test.com\",\n    \"password\": \"Password1234!\"\n  }\n}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Registers a new user with email & password, returning JWT access token and user info without password."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const responseJson = pm.response.json();\nif (responseJson.data && responseJson.data.login && responseJson.data.login.accessToken) {\n    pm.collectionVariables.set('auth_token', responseJson.data.login.accessToken);\n    console.log('Saved auth_token from login:', responseJson.data.login.accessToken);\n}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "mutation LoginUser($input: LoginInput!) {\n  login(input: $input) {\n    accessToken\n    user {\n      id\n      email\n      createdAt\n      updatedAt\n    }\n  }\n}",
+                "variables": "{\n  \"input\": {\n    \"email\": \"dr.fajar@test.com\",\n    \"password\": \"Password1234!\"\n  }\n}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Authenticates user credentials and generates a new JWT access token."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Validate Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query ValidateToken($input: ValidateTokenInput!) {\n  validateToken(input: $input) {\n    isValid\n    message\n    user {\n      id\n      email\n      createdAt\n      updatedAt\n    }\n  }\n}",
+                "variables": "{\n  \"input\": {\n    \"token\": \"{{auth_token}}\"\n  }\n}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Validates a JWT token and returns validity flag along with sanitized user details."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Get Current User (me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{auth_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query GetCurrentUserProfile {\n  me {\n    id\n    email\n    createdAt\n    updatedAt\n  }\n}",
+                "variables": "{}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            },
+            "description": "Fetches profile of currently logged in user using Authorization: Bearer <token>."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "REST (Inter-Service)",
+      "item": [
+        {
+          "name": "1. Validate Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{auth_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/validate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "validate"
+              ]
+            },
+            "description": "Endpoint called by other microservices sending token in the JSON body."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Validate Token (via Authorization Header)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{auth_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/validate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "validate"
+              ]
+            },
+            "description": "Endpoint called by other microservices sending token in the Authorization Bearer header."
+          },
+          "response": []
+        },
+        {
+          "name": "3. REST Me Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{auth_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "REST endpoint returning authenticated user profile."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Service Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "health"
+              ]
+            },
+            "description": "Checks the operational status of Auth Microservice."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001"
+    },
+    {
+      "key": "auth_token",
+      "value": ""
+    }
+  ]
+}

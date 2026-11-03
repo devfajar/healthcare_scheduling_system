@@ -1,0 +1,84 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+"""Authentication Response Payload containing JWT and user information"""
+type AuthPayload {
+  """JWT Access Token"""
+  accessToken: String!
+
+  """Authenticated user profile"""
+  user: User!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+"""Input data for user login"""
+input LoginInput {
+  """Registered user email address"""
+  email: String!
+
+  """User password"""
+  password: String!
+}
+
+type Mutation {
+  """Authenticate user and obtain JWT access token"""
+  login(input: LoginInput!): AuthPayload!
+
+  """Register a new user with email and password"""
+  register(input: RegisterInput!): AuthPayload!
+}
+
+type Query {
+  """Get profile of current authenticated user from Bearer token"""
+  me: User!
+
+  """Validate a JWT token and return associated user profile"""
+  validateToken(input: ValidateTokenInput!): TokenValidationResponse!
+}
+
+"""Input data for user registration"""
+input RegisterInput {
+  """User valid email address"""
+  email: String!
+
+  """User password (minimum 6 characters)"""
+  password: String!
+}
+
+"""Token validation response for inter-service communication"""
+type TokenValidationResponse {
+  """Whether the token is valid, unexpired, and user exists"""
+  isValid: Boolean!
+
+  """Status or error message"""
+  message: String
+
+  """User info if token is valid"""
+  user: User
+}
+
+"""Healthcare System User"""
+type User {
+  """Account creation timestamp"""
+  createdAt: DateTime!
+
+  """User unique email address"""
+  email: String!
+
+  """Unique user identifier (UUID)"""
+  id: ID!
+
+  """Last account update timestamp"""
+  updatedAt: DateTime!
+}
+
+"""Input data for token validation"""
+input ValidateTokenInput {
+  """JWT Access Token string to validate"""
+  token: String!
+}
