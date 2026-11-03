@@ -16,7 +16,7 @@ describe('AuthService', () => {
 
   const mockUser = {
     id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    email: 'doctor@hospital.com',
+    email: 'fajar@test.com',
     password: '$2b$10$hashedpasswordstringforuser',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -64,16 +64,16 @@ describe('AuthService', () => {
       }));
 
       const result = await authService.register({
-        email: 'doctor@hospital.com',
+        email: 'fajar@test.com',
         password: 'Password123!',
       });
 
       expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: { email: 'doctor@hospital.com' },
+        where: { email: 'fajar@test.com' },
       });
       expect(prismaService.user.create).toHaveBeenCalled();
       const createdCall = prismaService.user.create.mock.calls[0][0];
-      expect(createdCall.data.email).toBe('doctor@hospital.com');
+      expect(createdCall.data.email).toBe('fajar@test.com');
       // Verify bcrypt password was hashed
       expect(createdCall.data.password).not.toBe('Password123!');
       const isValidHash = await bcrypt.compare('Password123!', createdCall.data.password);
@@ -81,13 +81,13 @@ describe('AuthService', () => {
 
       expect(jwtService.signAsync).toHaveBeenCalledWith({
         sub: mockUser.id,
-        email: 'doctor@hospital.com',
+        email: 'fajar@test.com',
       });
       expect(result).toEqual({
         accessToken: 'mocked-jwt-access-token',
         user: {
           id: mockUser.id,
-          email: 'doctor@hospital.com',
+          email: 'fajar@test.com',
           createdAt: mockUser.createdAt,
           updatedAt: mockUser.updatedAt,
         },
@@ -100,7 +100,7 @@ describe('AuthService', () => {
 
       await expect(
         authService.register({
-          email: 'doctor@hospital.com',
+          email: 'fajar@test.com',
           password: 'Password123!',
         }),
       ).rejects.toThrow(ConflictException);
@@ -131,12 +131,12 @@ describe('AuthService', () => {
       });
 
       const result = await authService.login({
-        email: 'doctor@hospital.com',
+        email: 'fajar@test.com',
         password: 'Password123!',
       });
 
       expect(result.accessToken).toBe('mocked-jwt-access-token');
-      expect(result.user.email).toBe('doctor@hospital.com');
+      expect(result.user.email).toBe('fajar@test.com');
       expect(result.user.id).toBe(mockUser.id);
       expect((result.user as any).password).toBeUndefined();
     });
@@ -146,7 +146,7 @@ describe('AuthService', () => {
 
       await expect(
         authService.login({
-          email: 'unknown@hospital.com',
+          email: 'teddy@test.com',
           password: 'Password123!',
         }),
       ).rejects.toThrow(UnauthorizedException);
@@ -160,7 +160,7 @@ describe('AuthService', () => {
 
       await expect(
         authService.login({
-          email: 'doctor@hospital.com',
+          email: 'fajar@test.com',
           password: 'WrongPassword!',
         }),
       ).rejects.toThrow(UnauthorizedException);
@@ -204,7 +204,7 @@ describe('AuthService', () => {
     it('should return isValid: false if user does not exist in database', async () => {
       jwtService.verifyAsync.mockResolvedValue({
         sub: 'non-existent-user-id',
-        email: 'ghost@hospital.com',
+        email: 'dani@test.com',
       });
       prismaService.user.findUnique.mockResolvedValue(null);
 

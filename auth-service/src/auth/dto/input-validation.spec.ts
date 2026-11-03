@@ -7,7 +7,7 @@ describe('DTO & Email Format Validation', () => {
   describe('RegisterInput', () => {
     it('should pass validation when email and password are valid', async () => {
       const input = plainToInstance(RegisterInput, {
-        email: 'doctor.smith@hospital.com',
+        email: 'fajar@test.com',
         password: 'SecurePassword123!',
       });
 
@@ -49,7 +49,7 @@ describe('DTO & Email Format Validation', () => {
 
     it('should fail validation when password is shorter than 6 characters', async () => {
       const input = plainToInstance(RegisterInput, {
-        email: 'doctor@hospital.com',
+        email: 'teddy@test.com',
         password: '12345',
       });
 
@@ -64,7 +64,7 @@ describe('DTO & Email Format Validation', () => {
   describe('LoginInput', () => {
     it('should pass validation when email and password are provided and valid', async () => {
       const input = plainToInstance(LoginInput, {
-        email: 'doctor.smith@hospital.com',
+        email: 'fajar@test.com',
         password: 'Password123!',
       });
 
@@ -91,7 +91,7 @@ describe('DTO & Email Format Validation', () => {
 
     it('should fail validation when login password is missing or empty', async () => {
       const input = plainToInstance(LoginInput, {
-        email: 'doctor@hospital.com',
+        email: 'teddy@test.com',
         password: '',
       });
 

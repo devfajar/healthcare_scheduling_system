@@ -10,7 +10,7 @@ describe('AuthController', () => {
 
   const mockUser: User = {
     id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    email: 'doctor@hospital.com',
+    email: 'fajar@test.com',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };

@@ -5,14 +5,13 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-healthcare_auth}
+      POSTGRES_DB: ${POSTGRES_DB:-healthcare_db}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./auth-service/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-healthcare_auth}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-healthcare_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -28,14 +27,37 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-healthcare_auth}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-healthcare_db}?schema=public
       JWT_SECRET: ${JWT_SECRET:-healthcare-scheduling-system-jwt-secret-key-2026}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
     ports:
       - "3001:3001"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - healthcare_network
+    restart: unless-stopped
+
+  schedule-service:
+    build:
+      context: ./schedule-service
+      dockerfile: Dockerfile
+    container_name: healthcare_schedule_service
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-healthcare_db}?schema=public
+      AUTH_SERVICE_URL: http://auth-service:3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
     networks:
       - healthcare_network
     restart: unless-stopped

@@ -8,7 +8,7 @@ describe('JwtAuthGuard', () => {
 
   const mockUser = {
     id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    email: 'doctor@hospital.com',
+    email: 'fajar@test.com',
     createdAt: new Date(),
     updatedAt: new Date(),
   };

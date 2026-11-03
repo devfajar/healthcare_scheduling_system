@@ -11,7 +11,7 @@ describe('AuthResolver', () => {
 
   const mockUser: User = {
     id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    email: 'doctor@hospital.com',
+    email: 'fajar@test.com',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -52,7 +52,7 @@ describe('AuthResolver', () => {
   describe('register', () => {
     it('should call authService.register with input', async () => {
       const input = {
-        email: 'doctor@hospital.com',
+        email: 'fajar@test.com',
         password: 'Password123!',
       };
 
@@ -66,7 +66,7 @@ describe('AuthResolver', () => {
   describe('login', () => {
     it('should call authService.login with credentials', async () => {
       const input = {
-        email: 'doctor@hospital.com',
+        email: 'fajar@test.com',
         password: 'Password123!',
       };
 

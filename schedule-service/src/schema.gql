@@ -1,0 +1,237 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+"""Input data for creating a new customer"""
+input CreateCustomerInput {
+  """Customer email address"""
+  email: String!
+
+  """Customer full name"""
+  name: String!
+}
+
+"""Input data for creating a new doctor"""
+input CreateDoctorInput {
+  """Doctor full name"""
+  name: String!
+}
+
+"""Input data for creating a new schedule"""
+input CreateScheduleInput {
+  """Customer UUID"""
+  customerId: ID!
+
+  """Doctor UUID"""
+  doctorId: ID!
+
+  """Consultation objective / purpose"""
+  objective: String!
+
+  """Scheduled appointment date and time"""
+  scheduledAt: DateTime!
+}
+
+"""Healthcare Customer / Patient"""
+type Customer {
+  """Record creation timestamp"""
+  createdAt: DateTime!
+
+  """Customer unique email address"""
+  email: String!
+
+  """Customer UUID"""
+  id: ID!
+
+  """Customer full name"""
+  name: String!
+
+  """Last update timestamp"""
+  updatedAt: DateTime!
+}
+
+"""Paginated customer list"""
+type CustomerPagination {
+  """List of customers"""
+  items: [Customer!]!
+
+  """Current skip offset"""
+  skip: Int!
+
+  """Page limit / take"""
+  take: Int!
+
+  """Total number of customers"""
+  total: Int!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+"""Healthcare Doctor / Specialist"""
+type Doctor {
+  """Record creation timestamp"""
+  createdAt: DateTime!
+
+  """Doctor UUID"""
+  id: ID!
+
+  """Doctor full name with title"""
+  name: String!
+
+  """Last update timestamp"""
+  updatedAt: DateTime!
+}
+
+"""Paginated doctor list"""
+type DoctorPagination {
+  """List of doctors"""
+  items: [Doctor!]!
+
+  """Current skip offset"""
+  skip: Int!
+
+  """Page limit / take"""
+  take: Int!
+
+  """Total number of doctors"""
+  total: Int!
+}
+
+type Mutation {
+  """Create a new customer"""
+  createCustomer(input: CreateCustomerInput!): Customer!
+
+  """Create a new doctor"""
+  createDoctor(input: CreateDoctorInput!): Doctor!
+
+  """Create a new consultation schedule"""
+  createSchedule(input: CreateScheduleInput!): Schedule!
+
+  """Delete customer by ID"""
+  deleteCustomer(id: ID!): Customer!
+
+  """Delete doctor by ID"""
+  deleteDoctor(id: ID!): Doctor!
+
+  """Delete schedule by ID"""
+  deleteSchedule(id: ID!): Schedule!
+
+  """Update customer details"""
+  updateCustomer(input: UpdateCustomerInput!): Customer!
+
+  """Update doctor details"""
+  updateDoctor(input: UpdateDoctorInput!): Doctor!
+}
+
+"""Pagination parameters"""
+input PaginationInput {
+  """Number of records to skip"""
+  skip: Int! = 0
+
+  """Number of records to fetch"""
+  take: Int! = 10
+}
+
+type Query {
+  """Get customer by ID"""
+  customer(id: ID!): Customer!
+
+  """List customers with pagination"""
+  customers(pagination: PaginationInput): CustomerPagination!
+
+  """Get doctor by ID"""
+  doctor(id: ID!): Doctor!
+
+  """List doctors with pagination"""
+  doctors(pagination: PaginationInput): DoctorPagination!
+
+  """Get schedule by ID"""
+  schedule(id: ID!): Schedule!
+
+  """List schedules with optional filters and pagination"""
+  schedules(filter: ScheduleFilterInput, pagination: PaginationInput): SchedulePagination!
+}
+
+"""Healthcare Consultation Schedule"""
+type Schedule {
+  """Record creation timestamp"""
+  createdAt: DateTime!
+
+  """Customer details"""
+  customer: Customer
+
+  """Customer UUID"""
+  customerId: ID!
+
+  """Doctor details"""
+  doctor: Doctor
+
+  """Doctor UUID"""
+  doctorId: ID!
+
+  """Schedule UUID"""
+  id: ID!
+
+  """Consultation objective / purpose"""
+  objective: String!
+
+  """Scheduled appointment timestamp"""
+  scheduledAt: DateTime!
+
+  """Last update timestamp"""
+  updatedAt: DateTime!
+}
+
+"""Filter options for querying schedules"""
+input ScheduleFilterInput {
+  """Filter by Customer UUID"""
+  customerId: ID
+
+  """Filter by Doctor UUID"""
+  doctorId: ID
+
+  """Filter up to this date"""
+  endDate: DateTime
+
+  """Filter from this date"""
+  startDate: DateTime
+}
+
+"""Paginated schedule list"""
+type SchedulePagination {
+  """List of schedules"""
+  items: [Schedule!]!
+
+  """Current skip offset"""
+  skip: Int!
+
+  """Page limit / take"""
+  take: Int!
+
+  """Total number of schedules"""
+  total: Int!
+}
+
+"""Input data for updating customer"""
+input UpdateCustomerInput {
+  """Updated customer email"""
+  email: String
+
+  """Customer UUID"""
+  id: ID!
+
+  """Updated customer name"""
+  name: String
+}
+
+"""Input data for updating doctor"""
+input UpdateDoctorInput {
+  """Doctor UUID"""
+  id: ID!
+
+  """Updated doctor name"""
+  name: String
+}

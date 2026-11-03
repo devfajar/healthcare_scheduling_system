@@ -1,0 +1,46 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+model Customer {
+  id        String     @id @default(uuid())
+  name      String
+  email     String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  schedules Schedule[]
+
+  @@map("customers")
+}
+
+model Doctor {
+  id        String     @id @default(uuid())
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  schedules Schedule[]
+
+  @@map("doctors")
+}
+
+model Schedule {
+  id          String   @id @default(uuid())
+  objective   String
+  customerId  String
+  doctorId    String
+  scheduledAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  doctor   Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  // Constraint: Tidak boleh ada jadwal yang bentrok (dokter yang sama pada waktu yang sama)
+  @@unique([doctorId, scheduledAt], name: "doctor_schedule_unique")
+  @@map("schedules")
+}
