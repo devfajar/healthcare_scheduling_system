@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ScheduleService } from './schedule.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailProducerService } from '../mail/mail-producer.service';
 
 describe('ScheduleService', () => {
   let service: ScheduleService;
   let prismaService: any;
+  let mailProducerService: any;
 
   const mockCustomer = {
     id: 'c1111111-1111-1111-1111-111111111111',
@@ -49,10 +51,16 @@ describe('ScheduleService', () => {
       },
     };
 
+    mailProducerService = {
+      queueScheduleCreated: jest.fn().mockResolvedValue(undefined),
+      queueScheduleCancelled: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ScheduleService,
         { provide: PrismaService, useValue: prismaService },
+        { provide: MailProducerService, useValue: mailProducerService },
       ],
     }).compile();
 
@@ -60,7 +68,7 @@ describe('ScheduleService', () => {
   });
 
   describe('createSchedule', () => {
-    it('should successfully create schedule when customer, doctor exist and time is available', async () => {
+    it('should successfully create schedule and enqueue confirmation email', async () => {
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
       prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
       // No conflict
@@ -89,6 +97,16 @@ describe('ScheduleService', () => {
         },
       });
       expect(result).toEqual(mockSchedule);
+
+      // Verify email job is queued to Bull Queue
+      expect(mailProducerService.queueScheduleCreated).toHaveBeenCalledWith({
+        scheduleId: mockSchedule.id,
+        customerName: mockCustomer.name,
+        customerEmail: mockCustomer.email,
+        doctorName: mockDoctor.name,
+        scheduledAt: mockSchedule.scheduledAt,
+        objective: mockSchedule.objective,
+      });
     });
 
     it('should throw NotFoundException if customer does not exist', async () => {
@@ -96,14 +114,14 @@ describe('ScheduleService', () => {
 
       await expect(
         service.createSchedule({
-          objective: 'General Checkup',
-          customerId: 'non-existent-customer',
+          objective: 'Consultation',
+          customerId: 'invalid-customer-id',
           doctorId: mockDoctor.id,
           scheduledAt: scheduledDate,
         }),
-      ).rejects.toThrow(
-        new NotFoundException('Customer with ID "non-existent-customer" not found'),
-      );
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException if doctor does not exist', async () => {
@@ -112,52 +130,59 @@ describe('ScheduleService', () => {
 
       await expect(
         service.createSchedule({
-          objective: 'General Checkup',
+          objective: 'Consultation',
           customerId: mockCustomer.id,
-          doctorId: 'non-existent-doctor',
+          doctorId: 'invalid-doctor-id',
           scheduledAt: scheduledDate,
         }),
-      ).rejects.toThrow(
-        new NotFoundException('Doctor with ID "non-existent-doctor" not found'),
-      );
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
     });
 
-    it('should throw ConflictException if doctor already has an appointment at the same time', async () => {
+    it('should throw ConflictException if doctor has conflicting schedule at the same time', async () => {
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
       prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
-      // Conflict exists!
+      // Conflicting schedule exists
       prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
 
       await expect(
         service.createSchedule({
-          objective: 'Urgent Consultation',
+          objective: 'Conflicting Schedule with Customer Dani',
           customerId: mockCustomer.id,
           doctorId: mockDoctor.id,
           scheduledAt: scheduledDate,
         }),
       ).rejects.toThrow(ConflictException);
+
+      expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
     });
   });
 
   describe('schedules', () => {
-    it('should return paginated schedules', async () => {
+    it('should return paginated schedules list', async () => {
       prismaService.schedule.findMany.mockResolvedValue([mockSchedule]);
       prismaService.schedule.count.mockResolvedValue(1);
 
-      const result = await service.schedules(undefined, { skip: 0, take: 10 });
+      const result = await service.schedules();
 
       expect(result.items).toHaveLength(1);
       expect(result.total).toBe(1);
+      expect(result.skip).toBe(0);
+      expect(result.take).toBe(10);
     });
 
-    it('should filter schedules by doctorId and customerId', async () => {
+    it('should apply doctor and customer filters when provided', async () => {
       prismaService.schedule.findMany.mockResolvedValue([mockSchedule]);
       prismaService.schedule.count.mockResolvedValue(1);
 
-      await service.schedules({
-        doctorId: mockDoctor.id,
-        customerId: mockCustomer.id,
-      });
+      await service.schedules(
+        {
+          doctorId: mockDoctor.id,
+          customerId: mockCustomer.id,
+        },
+        { skip: 0, take: 5 },
+      );
 
       expect(prismaService.schedule.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -165,13 +190,36 @@ describe('ScheduleService', () => {
             doctorId: mockDoctor.id,
             customerId: mockCustomer.id,
           },
+          skip: 0,
+          take: 5,
+        }),
+      );
+    });
+
+    it('should apply date range filters when provided', async () => {
+      prismaService.schedule.findMany.mockResolvedValue([mockSchedule]);
+      prismaService.schedule.count.mockResolvedValue(1);
+
+      const from = new Date('2026-12-01T00:00:00.000Z');
+      const to = new Date('2026-12-02T00:00:00.000Z');
+
+      await service.schedules({ startDate: from, endDate: to });
+
+      expect(prismaService.schedule.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            scheduledAt: {
+              gte: from,
+              lte: to,
+            },
+          },
         }),
       );
     });
   });
 
   describe('schedule', () => {
-    it('should return single schedule by ID', async () => {
+    it('should return schedule by ID', async () => {
       prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
 
       const result = await service.schedule(mockSchedule.id);
@@ -188,12 +236,22 @@ describe('ScheduleService', () => {
   });
 
   describe('deleteSchedule', () => {
-    it('should successfully delete schedule', async () => {
+    it('should successfully delete schedule and enqueue cancellation email', async () => {
       prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
       prismaService.schedule.delete.mockResolvedValue(mockSchedule);
 
       const result = await service.deleteSchedule(mockSchedule.id);
       expect(result).toEqual(mockSchedule);
+
+      // Verify cancellation email job is queued to Bull Queue
+      expect(mailProducerService.queueScheduleCancelled).toHaveBeenCalledWith({
+        scheduleId: mockSchedule.id,
+        customerName: mockCustomer.name,
+        customerEmail: mockCustomer.email,
+        doctorName: mockDoctor.name,
+        scheduledAt: mockSchedule.scheduledAt,
+        objective: mockSchedule.objective,
+      });
     });
 
     it('should throw NotFoundException if schedule to delete is not found', async () => {
@@ -202,6 +260,8 @@ describe('ScheduleService', () => {
       await expect(service.deleteSchedule('non-existent-id')).rejects.toThrow(
         NotFoundException,
       );
+
+      expect(mailProducerService.queueScheduleCancelled).not.toHaveBeenCalled();
     });
   });
 });

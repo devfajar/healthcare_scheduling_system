@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailProducerService } from '../mail/mail-producer.service';
 import { CreateScheduleInput } from './dto/create-schedule.input';
 import { ScheduleFilterInput } from './dto/schedule-filter.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -15,7 +16,10 @@ import { SchedulePagination } from './models/schedule-pagination.model';
 export class ScheduleService {
   private readonly logger = new Logger(ScheduleService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailProducerService: MailProducerService,
+  ) {}
 
   /**
    * Create a new consultation schedule
@@ -70,6 +74,17 @@ export class ScheduleService {
     });
 
     this.logger.log(`Created schedule: ${schedule.id} for doctor ${schedule.doctorId}`);
+
+    // Dispatch email notification to customer via Bull Queue
+    await this.mailProducerService.queueScheduleCreated({
+      scheduleId: schedule.id,
+      customerName: schedule.customer.name,
+      customerEmail: schedule.customer.email,
+      doctorName: schedule.doctor.name,
+      scheduledAt: schedule.scheduledAt,
+      objective: schedule.objective,
+    });
+
     return schedule;
   }
 
@@ -160,12 +175,24 @@ export class ScheduleService {
       throw new NotFoundException(`Schedule with ID "${id}" not found`);
     }
 
-    return this.prisma.schedule.delete({
+    const deleted = await this.prisma.schedule.delete({
       where: { id },
       include: {
         customer: true,
         doctor: true,
       },
     });
+
+    // Dispatch cancellation email notification to customer via Bull Queue
+    await this.mailProducerService.queueScheduleCancelled({
+      scheduleId: deleted.id,
+      customerName: deleted.customer.name,
+      customerEmail: deleted.customer.email,
+      doctorName: deleted.doctor.name,
+      scheduledAt: deleted.scheduledAt,
+      objective: deleted.objective,
+    });
+
+    return deleted;
   }
 }

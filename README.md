@@ -16,6 +16,8 @@ flowchart TD
     AuthService["Auth Microservice (Port 3001)\nNestJS + GraphQL + REST"]
     ScheduleService["Schedule Microservice (Port 3002)\nCustomer + Doctor + Schedule"]
     PostgresDB[("PostgreSQL\nhealthcare_db")]
+    RedisDB[("Redis (Port 6379)\nBull Queue")]
+    CustomerEmail["Customer Email Inbox\n(Nodemailer / SMTP)"]
 
     %% Authentication Flow
     Client -->|"1. register / login"| AuthService
@@ -29,6 +31,11 @@ flowchart TD
 
     %% Schedule DB Operations
     ScheduleService -->|"5. Execute Operation (Customer/Doctor/Schedule)"| PostgresDB
+
+    %% Queue & Email Notification
+    ScheduleService -->|"6. Enqueue Email Job (Created / Cancelled)"| RedisDB
+    RedisDB -->|"7. Bull Worker Process Job"| ScheduleService
+    ScheduleService -->|"8. Send Email Notification"| CustomerEmail
 ```
 
 ### Mekanisme Autentikasi Antar Service:
@@ -68,6 +75,14 @@ flowchart TD
 2. **Validasi Entitas**: Customer dan Doctor harus valid dan terdaftar di database sebelum jadwal dapat dibuat. Jika ID tidak ditemukan, sistem melempar error **HTTP 404 Not Found**.
 3. **Autentikasi Penuh**: Semua endpoint membutuhkan token JWT yang valid dari Auth Service.
 
+### D. Email Notification & Bull Queue System (`schedule-service`)
+- **Queue Engine**: Menggunakan **Bull Queue** berbasis **Redis** (`@nestjs/bull` + `ioredis`) untuk pemrosesan asynchronous non-blocking di latar belakang.
+- **Retry Mechanism**: Dilengkapi dengan retry otomatis 3x dengan *exponential backoff* dan logging kegagalan queue.
+- **Event Notifikasi**:
+  1. **Schedule Created**: Saat jadwal berhasil dibuat, job `schedule_created` dikirim ke queue, dan worker mengirimkan email konfirmasi ke email customer (`teddy@test.com`) berisi detail dokter, waktu jadwal, dan tujuan konsultasi.
+  2. **Schedule Cancelled / Deleted**: Saat jadwal dihapus/dibatalkan, job `schedule_cancelled` dikirim ke queue, dan worker mengirimkan email pemberitahuan pembatalan ke customer.
+- **Transporter**: Terintegrasi dengan **Nodemailer**. Mendukung konfigurasi real SMTP atau fallback otomatis ke *JSON/stream transport* pada mode development/testing tanpa memerlukan credential pihak ketiga.
+
 ---
 
 ## 🔑 3. List Environment Variables
@@ -79,11 +94,18 @@ Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Te
 | `POSTGRES_USER` | DB | `postgres` | Username database PostgreSQL. |
 | `POSTGRES_PASSWORD` | DB | `postgres` | **Sensitif**. Password database PostgreSQL. |
 | `POSTGRES_DB` | DB | `healthcare_db` | Database default saat PostgreSQL inisialisasi. |
+| `REDIS_HOST` | Queue | `redis` / `localhost` | Hostname Redis untuk Bull Queue. |
+| `REDIS_PORT` | Queue | `6379` | Port server Redis. |
 | `AUTH_SERVICE_PORT` | Auth | `3001` | Port aplikasi Auth Service. |
 | `JWT_SECRET` | Auth | *(Minimal 32 karakter)* | **Sangat Sensitif**. Kunci enkripsi untuk token JWT. |
 | `JWT_EXPIRES_IN` | Auth | `1d` | Masa aktif token JWT (contoh: `1d` = 24 jam). |
 | `SCHEDULE_SERVICE_PORT` | Schedule | `3002` | Port aplikasi Schedule Service. |
 | `AUTH_SERVICE_URL` | Schedule | `http://auth-service:3001` | URL Auth Service untuk validasi token antar service. |
+| `SMTP_HOST` | Mail | *(Opsional)* | Host server SMTP (kosongkan untuk test/JSON transport). |
+| `SMTP_PORT` | Mail | `587` | Port server SMTP. |
+| `SMTP_USER` | Mail | *(Opsional)* | Username autentikasi SMTP. |
+| `SMTP_PASS` | Mail | *(Opsional)* | Password autentikasi SMTP. |
+| `SMTP_FROM` | Mail | `noreply@healthcare.com` | Alamat pengirim email sistem. |
 | `CORS_ORIGIN` | All | `*` / `http://localhost:3000` | Whitelist domain frontend yang diizinkan (CORS). |
 
 ---
@@ -139,7 +161,6 @@ Pastikan PostgreSQL aktif di port 5432:
    # Test Schedule Service (31 tests)
    cd schedule-service && npm test
    ```
-   *Total: **77 Unit Tests** berjalan 100% lulus.*
 
 ---
 
@@ -304,3 +325,5 @@ File Postman Collection lengkap disediakan di:
    - Menjalankan `Create Doctor` otomatis menyimpan ID ke `{{doctor_id}}`.
    - Menjalankan `Create Schedule` otomatis menggunakan `{{customer_id}}` dan `{{doctor_id}}` tanpa perlu copy-paste manual!
 3. **Pengujian Bentrok Terpasang**: Terdapat request *Create Conflicting Schedule* untuk membuktikan penolakan jadwal bentrok secara otomatis.
+
+---
