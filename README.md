@@ -81,11 +81,6 @@ flowchart TD
   - Memicu job antrean email pembatalan ke Bull Queue.
   - Menginvalidasi cache jadwal terkait.
 
-#### ⚠️ Ketentuan Khusus Penjadwalan:
-1. **Pencegahan Bentrok (*No Overlapping/Conflict*)**: Tidak boleh ada jadwal yang bentrok untuk dokter yang sama pada waktu yang sama. Jika dokter sudah memiliki jadwal pada jam tersebut, sistem akan melempar error **HTTP 409 Conflict**.
-2. **Validasi Entitas**: Customer dan Doctor harus valid dan terdaftar di database sebelum jadwal dapat dibuat. Jika ID tidak ditemukan, sistem melempar error **HTTP 404 Not Found**.
-3. **Autentikasi Penuh**: Semua endpoint membutuhkan token JWT yang valid dari Auth Service.
-
 ### D. Redis Caching System (`schedule-service`)
 - Menggunakan pola **Cache-Aside Pattern** berkecepatan tinggi via **Redis** (`ioredis`).
 - **Query Optimization**: Data query (`customers`, `doctors`, `schedules`, dan pencarian by ID) disimpan di Redis dengan TTL default 300 detik (5 menit).
