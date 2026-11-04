@@ -18,10 +18,11 @@ export class AuthResolver {
    * Register a new user
    */
   @Mutation(() => AuthPayload, {
-    description: 'Register a new user with email and password',
+    description: 'Mendaftarkan pengguna baru dengan email dan password (password di-hash dengan bcrypt, mengembalikan JWT token)',
   })
   async register(
-    @Args('input') input: RegisterInput,
+    @Args('input', { description: 'Payload registrasi user (email valid dan password minimal 6 karakter)' })
+    input: RegisterInput,
   ): Promise<AuthPayload> {
     return this.authService.register(input);
   }
@@ -30,10 +31,11 @@ export class AuthResolver {
    * Login user with credentials
    */
   @Mutation(() => AuthPayload, {
-    description: 'Authenticate user and obtain JWT access token',
+    description: 'Autentikasi login pengguna dengan email & password, mengembalikan JWT access token dengan masa berlaku 1 hari',
   })
   async login(
-    @Args('input') input: LoginInput,
+    @Args('input', { description: 'Payload kredensial login (email dan password)' })
+    input: LoginInput,
   ): Promise<AuthPayload> {
     return this.authService.login(input);
   }
@@ -42,10 +44,11 @@ export class AuthResolver {
    * Validate token query for inter-service and client validation
    */
   @Query(() => TokenValidationResponse, {
-    description: 'Validate a JWT token and return associated user profile',
+    description: 'Memvalidasi keabsahan JWT token dan mengembalikan data profil pengguna yang berwenang',
   })
   async validateToken(
-    @Args('input') input: ValidateTokenInput,
+    @Args('input', { description: 'Payload token JWT yang akan divalidasi' })
+    input: ValidateTokenInput,
   ): Promise<TokenValidationResponse> {
     return this.authService.validateToken(input.token);
   }
@@ -54,7 +57,7 @@ export class AuthResolver {
    * Get current authenticated user profile
    */
   @Query(() => User, {
-    description: 'Get profile of current authenticated user from Bearer token',
+    description: 'Mengambil profil data pengguna yang sedang login berdasarkan header Authorization Bearer token',
   })
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: User): Promise<User> {

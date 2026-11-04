@@ -2,10 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { CustomerService } from './customer.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
 
 describe('CustomerService', () => {
   let service: CustomerService;
   let prismaService: any;
+  let cacheService: any;
 
   const mockCustomer = {
     id: 'c1111111-1111-1111-1111-111111111111',
@@ -27,10 +30,18 @@ describe('CustomerService', () => {
       },
     };
 
+    cacheService = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      del: jest.fn().mockResolvedValue(undefined),
+      delByPattern: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CustomerService,
         { provide: PrismaService, useValue: prismaService },
+        { provide: RedisCacheService, useValue: cacheService },
       ],
     }).compile();
 
@@ -38,7 +49,7 @@ describe('CustomerService', () => {
   });
 
   describe('createCustomer', () => {
-    it('should successfully create a customer', async () => {
+    it('should successfully create a customer and invalidate list cache', async () => {
       prismaService.customer.findUnique.mockResolvedValue(null);
       prismaService.customer.create.mockResolvedValue(mockCustomer);
 
@@ -50,6 +61,7 @@ describe('CustomerService', () => {
       expect(prismaService.customer.findUnique).toHaveBeenCalledWith({
         where: { email: 'teddy@test.com' },
       });
+      expect(cacheService.delByPattern).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
       expect(result).toEqual(mockCustomer);
     });
 
@@ -66,7 +78,7 @@ describe('CustomerService', () => {
   });
 
   describe('updateCustomer', () => {
-    it('should successfully update customer details', async () => {
+    it('should successfully update customer details and invalidate cache', async () => {
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
       prismaService.customer.update.mockResolvedValue({
         ...mockCustomer,
@@ -79,6 +91,8 @@ describe('CustomerService', () => {
       });
 
       expect(result.name).toBe('Teddy');
+      expect(cacheService.delByPattern).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
+      expect(cacheService.del).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMER}:${mockCustomer.id}`);
     });
 
     it('should throw NotFoundException if customer does not exist', async () => {
@@ -94,7 +108,24 @@ describe('CustomerService', () => {
   });
 
   describe('customers', () => {
-    it('should return paginated customers list', async () => {
+    it('should return cached data if available (Cache Hit)', async () => {
+      const cachedData = {
+        items: [mockCustomer],
+        total: 1,
+        skip: 0,
+        take: 10,
+      };
+      cacheService.get.mockResolvedValue(cachedData);
+
+      const result = await service.customers({ skip: 0, take: 10 });
+
+      expect(result).toEqual(cachedData);
+      expect(cacheService.get).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMERS_LIST}:0:10`);
+      expect(prismaService.customer.findMany).not.toHaveBeenCalled();
+    });
+
+    it('should query DB and populate cache on Cache Miss', async () => {
+      cacheService.get.mockResolvedValue(null);
       prismaService.customer.findMany.mockResolvedValue([mockCustomer]);
       prismaService.customer.count.mockResolvedValue(1);
 
@@ -102,20 +133,39 @@ describe('CustomerService', () => {
 
       expect(result.items).toHaveLength(1);
       expect(result.total).toBe(1);
-      expect(result.skip).toBe(0);
-      expect(result.take).toBe(10);
+      expect(cacheService.set).toHaveBeenCalledWith(
+        `${CACHE_PREFIX.CUSTOMERS_LIST}:0:10`,
+        expect.objectContaining({ total: 1 }),
+        CACHE_TTL.CUSTOMERS,
+      );
     });
   });
 
   describe('customer', () => {
-    it('should return customer by ID', async () => {
+    it('should return cached customer if available (Cache Hit)', async () => {
+      cacheService.get.mockResolvedValue(mockCustomer);
+
+      const result = await service.customer(mockCustomer.id);
+      expect(result).toEqual(mockCustomer);
+      expect(cacheService.get).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMER}:${mockCustomer.id}`);
+      expect(prismaService.customer.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('should query DB and store in cache on Cache Miss', async () => {
+      cacheService.get.mockResolvedValue(null);
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
 
       const result = await service.customer(mockCustomer.id);
       expect(result).toEqual(mockCustomer);
+      expect(cacheService.set).toHaveBeenCalledWith(
+        `${CACHE_PREFIX.CUSTOMER}:${mockCustomer.id}`,
+        mockCustomer,
+        CACHE_TTL.CUSTOMER_DETAIL,
+      );
     });
 
     it('should throw NotFoundException if customer is not found', async () => {
+      cacheService.get.mockResolvedValue(null);
       prismaService.customer.findUnique.mockResolvedValue(null);
 
       await expect(service.customer('unknown-id')).rejects.toThrow(
@@ -125,12 +175,14 @@ describe('CustomerService', () => {
   });
 
   describe('deleteCustomer', () => {
-    it('should successfully delete customer', async () => {
+    it('should successfully delete customer and invalidate cache', async () => {
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
       prismaService.customer.delete.mockResolvedValue(mockCustomer);
 
       const result = await service.deleteCustomer(mockCustomer.id);
       expect(result).toEqual(mockCustomer);
+      expect(cacheService.delByPattern).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
+      expect(cacheService.del).toHaveBeenCalledWith(`${CACHE_PREFIX.CUSTOMER}:${mockCustomer.id}`);
     });
 
     it('should throw NotFoundException when deleting non-existent customer', async () => {

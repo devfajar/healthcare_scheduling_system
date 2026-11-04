@@ -5,7 +5,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import type { Request } from 'express';
 import { AuthClientService } from './auth-client.service';
+import { AuthenticatedUser } from './interfaces/authenticated-user.interface';
+
+export interface AuthenticatedRequest extends Request {
+  user?: AuthenticatedUser | null;
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -26,7 +32,7 @@ export class AuthGuard implements CanActivate {
       );
     }
 
-    // Call Auth Service validateToken endpoint
+    // Call Auth Service validateToken endpoint (Optimized with Redis Cache)
     const validation = await this.authClientService.validateToken(token);
     if (!validation.isValid || !validation.user) {
       throw new UnauthorizedException(
@@ -34,17 +40,17 @@ export class AuthGuard implements CanActivate {
       );
     }
 
-    // Attach validated user to request
+    // Attach validated user to strongly typed request
     req.user = validation.user;
     return true;
   }
 
-  private getRequest(context: ExecutionContext): any {
+  private getRequest(context: ExecutionContext): AuthenticatedRequest {
     const gqlContext = GqlExecutionContext.create(context);
-    const req = gqlContext.getContext()?.req;
-    if (req) {
-      return req;
+    const gqlReq = gqlContext.getContext<{ req?: AuthenticatedRequest }>()?.req;
+    if (gqlReq) {
+      return gqlReq;
     }
-    return context.switchToHttp().getRequest();
+    return context.switchToHttp().getRequest<AuthenticatedRequest>();
   }
 }

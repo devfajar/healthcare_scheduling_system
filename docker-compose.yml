@@ -87,6 +87,31 @@ services:
       - healthcare_network
     restart: unless-stopped
 
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: healthcare_notification_service
+    environment:
+      PORT: 3003
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@healthcare.com}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      - "3003:3003"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - healthcare_network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local

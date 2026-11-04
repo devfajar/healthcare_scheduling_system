@@ -5,7 +5,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import type { Request } from 'express';
 import { AuthService } from '../auth.service';
+import { User } from '../models/user.model';
+
+export interface AuthenticatedUserRequest extends Request {
+  user?: User;
+}
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -33,12 +39,12 @@ export class JwtAuthGuard implements CanActivate {
     return true;
   }
 
-  private getRequest(context: ExecutionContext): any {
+  private getRequest(context: ExecutionContext): AuthenticatedUserRequest {
     const gqlCtx = GqlExecutionContext.create(context);
-    const req = gqlCtx.getContext()?.req;
-    if (req) {
-      return req;
+    const gqlReq = gqlCtx.getContext<{ req?: AuthenticatedUserRequest }>()?.req;
+    if (gqlReq) {
+      return gqlReq;
     }
-    return context.switchToHttp().getRequest();
+    return context.switchToHttp().getRequest<AuthenticatedUserRequest>();
   }
 }

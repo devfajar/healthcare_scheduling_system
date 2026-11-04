@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { BullModule } from '@nestjs/bull';
+import type { Request, Response } from 'express';
 import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -10,6 +11,7 @@ import { CustomerModule } from './customer/customer.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { MailModule } from './mail/mail.module';
+import { RedisCacheModule } from './cache/redis-cache.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -33,8 +35,10 @@ import { AppController } from './app.controller';
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: true,
-      context: ({ req, res }: { req: any; res: any }) => ({ req, res }),
+      introspection: true,
+      context: ({ req, res }: { req: Request; res: Response }) => ({ req, res }),
     }),
+    RedisCacheModule,
     PrismaModule,
     AuthModule,
     CustomerModule,

@@ -1,22 +1,26 @@
 # Healthcare Scheduling System - Microservices Architecture
 
-Sistem penjadwalan layanan kesehatan berbasis arsitektur **Microservices** modern menggunakan **NestJS**, **PostgreSQL**, **GraphQL (Apollo Server)**, **Prisma ORM**, dan **Docker & Docker Compose**.
+Sistem penjadwalan layanan kesehatan berbasis arsitektur **Microservices** modern menggunakan **NestJS**, **PostgreSQL**, **GraphQL (Apollo Server)**, **Prisma ORM**, **Redis (Bull Queue & Caching)**, **Nodemailer**, dan **Docker & Docker Compose**.
 
-Sistem ini terdiri dari 2 microservice utama yang saling terintegrasi:
+Sistem ini terdiri dari 3 microservice utama dan 2 infrastruktur pendukung yang saling terintegrasi:
 1. **Auth Service (`port: 3001`)**: Manajemen akun pengguna, otentikasi (JWT), dan penyedia validasi token untuk seluruh ekosistem.
-2. **Schedule Service (`port: 3002`)**: Manajemen Customer/Pasien, Dokter, dan Penjadwalan Konsultasi (*Appointment Scheduling*) dengan proteksi autentikasi antar service serta pencegahan jadwal bentrok (*conflict prevention*).
+2. **Schedule Service (`port: 3002`)**: Manajemen Customer/Pasien, Dokter, dan Penjadwalan Konsultasi (*Appointment Scheduling*) dengan proteksi autentikasi antar service, pencegahan jadwal bentrok (*conflict prevention*), dan optimasi **Redis Caching**.
+3. **Notification Service (`port: 3003`)**: Layanan pemroses antrean (Bull Queue) yang menangani pengiriman email notifikasi otomatis ke customer saat jadwal dibuat atau dibatalkan.
+4. **PostgreSQL (`port: 5432`)**: Single database terpadu (`healthcare_db`) untuk seluruh microservice.
+5. **Redis (`port: 6379`)**: Broker pesan untuk Bull Queue dan memori berkecepatan tinggi untuk query caching.
 
 ---
 
-## 🏛️ 1. Arsitektur Sistem & Alur Autentikasi
+## 🏛️ 1. Arsitektur Sistem & Alur Kerja
 
 ```mermaid
 flowchart TD
     Client["Client / Frontend / Apollo Client"]
     AuthService["Auth Microservice (Port 3001)\nNestJS + GraphQL + REST"]
     ScheduleService["Schedule Microservice (Port 3002)\nCustomer + Doctor + Schedule"]
+    NotificationService["Notification Microservice (Port 3003)\nBull Consumer + Nodemailer"]
     PostgresDB[("PostgreSQL\nhealthcare_db")]
-    RedisDB[("Redis (Port 6379)\nBull Queue")]
+    RedisQueue[("Redis (Port 6379)\nBull Queue & Caching")]
     CustomerEmail["Customer Email Inbox\n(Nodemailer / SMTP)"]
 
     %% Authentication Flow
@@ -29,13 +33,16 @@ flowchart TD
     ScheduleService -->|"3. HTTP POST /auth/validate\n(Verify Token & User)"| AuthService
     AuthService -- "4. Returns isValid & user" --> ScheduleService
 
+    %% Caching Layer
+    ScheduleService <-->|"Cache Hit / Miss (TTL: 300s)"| RedisQueue
+
     %% Schedule DB Operations
     ScheduleService -->|"5. Execute Operation (Customer/Doctor/Schedule)"| PostgresDB
 
-    %% Queue & Email Notification
-    ScheduleService -->|"6. Enqueue Email Job (Created / Cancelled)"| RedisDB
-    RedisDB -->|"7. Bull Worker Process Job"| ScheduleService
-    ScheduleService -->|"8. Send Email Notification"| CustomerEmail
+    %% Queue & Asynchronous Email Notification
+    ScheduleService -->|"6. Enqueue Email Job (schedule_created / cancelled)"| RedisQueue
+    RedisQueue -->|"7. Bull Worker Fetch Job"| NotificationService
+    NotificationService -->|"8. Send Email Notification"| CustomerEmail
 ```
 
 ### Mekanisme Autentikasi Antar Service:
@@ -48,44 +55,65 @@ flowchart TD
 
 ---
 
-## 🔐 2. Ringkasan Modul & Aturan Bisnis
+## 🔐 2. Ringkasan Modul & Fitur Sistem
 
 ### A. Customer Module (`schedule-service`)
-- `createCustomer(input)`: Membuat customer baru (nama dan email unik).
-- `updateCustomer(input)`: Update data customer berdasarkan ID.
-- `customers(pagination)`: Menampilkan daftar semua customer dengan pagination (`skip`, `take`, `total`).
-- `customer(id)`: Mengambil detail customer berdasarkan ID.
-- `deleteCustomer(id)`: Menghapus customer berdasarkan ID.
+- `createCustomer(input)`: Membuat customer baru (nama dan email unik). Menginvalidasi cache daftar customer.
+- `updateCustomer(input)`: Update data customer berdasarkan ID. Menginvalidasi cache.
+- `customers(pagination)`: Menampilkan daftar semua customer dengan paginasi (`skip`, `take`, `total`) serta **Redis Caching** (TTL: 300s).
+- `customer(id)`: Mengambil detail customer berdasarkan ID dengan **Redis Caching**.
+- `deleteCustomer(id)`: Menghapus customer berdasarkan ID dan membersihkan cache.
 
 ### B. Doctor Module (`schedule-service`)
-- `createDoctor(input)`: Membuat dokter baru (nama lengkap beserta gelar).
-- `updateDoctor(input)`: Update data dokter berdasarkan ID.
-- `doctors(pagination)`: Menampilkan daftar dokter dengan pagination.
-- `doctor(id)`: Mengambil detail dokter berdasarkan ID.
-- `deleteDoctor(id)`: Menghapus dokter berdasarkan ID.
+- `createDoctor(input)`: Membuat dokter baru (nama lengkap beserta gelar). Menginvalidasi cache daftar dokter.
+- `updateDoctor(input)`: Update data dokter berdasarkan ID. Menginvalidasi cache.
+- `doctors(pagination)`: Menampilkan daftar dokter dengan paginasi serta **Redis Caching** (TTL: 300s).
+- `doctor(id)`: Mengambil detail dokter berdasarkan ID dengan **Redis Caching**.
+- `deleteDoctor(id)`: Menghapus dokter berdasarkan ID dan membersihkan cache.
 
 ### C. Schedule Module (`schedule-service`)
 - `createSchedule(input)`: Membuat jadwal konsultasi baru (`objective`, `customerId`, `doctorId`, `scheduledAt`).
-- `schedules(filter, pagination)`: Menampilkan daftar jadwal dengan filter (`doctorId`, `customerId`, rentang tanggal `startDate` - `endDate`) dan pagination.
-- `schedule(id)`: Mengambil jadwal lengkap dengan relasi data Customer dan Doctor.
+  - Memicu job antrean email konfirmasi ke Bull Queue.
+  - Menginvalidasi cache jadwal konsultasi.
+- `schedules(filter, pagination)`: Menampilkan daftar jadwal dengan filter (`doctorId`, `customerId`, rentang tanggal `startDate` - `endDate`) dan paginasi dengan **Redis Caching**.
+- `schedule(id)`: Mengambil jadwal lengkap dengan relasi data Customer dan Doctor dengan **Redis Caching**.
 - `deleteSchedule(id)`: Menghapus jadwal konsultasi.
+  - Memicu job antrean email pembatalan ke Bull Queue.
+  - Menginvalidasi cache jadwal terkait.
 
 #### ⚠️ Ketentuan Khusus Penjadwalan:
 1. **Pencegahan Bentrok (*No Overlapping/Conflict*)**: Tidak boleh ada jadwal yang bentrok untuk dokter yang sama pada waktu yang sama. Jika dokter sudah memiliki jadwal pada jam tersebut, sistem akan melempar error **HTTP 409 Conflict**.
 2. **Validasi Entitas**: Customer dan Doctor harus valid dan terdaftar di database sebelum jadwal dapat dibuat. Jika ID tidak ditemukan, sistem melempar error **HTTP 404 Not Found**.
 3. **Autentikasi Penuh**: Semua endpoint membutuhkan token JWT yang valid dari Auth Service.
 
-### D. Email Notification & Bull Queue System (`schedule-service`)
-- **Queue Engine**: Menggunakan **Bull Queue** berbasis **Redis** (`@nestjs/bull` + `ioredis`) untuk pemrosesan asynchronous non-blocking di latar belakang.
-- **Retry Mechanism**: Dilengkapi dengan retry otomatis 3x dengan *exponential backoff* dan logging kegagalan queue.
-- **Event Notifikasi**:
-  1. **Schedule Created**: Saat jadwal berhasil dibuat, job `schedule_created` dikirim ke queue, dan worker mengirimkan email konfirmasi ke email customer (`teddy@test.com`) berisi detail dokter, waktu jadwal, dan tujuan konsultasi.
-  2. **Schedule Cancelled / Deleted**: Saat jadwal dihapus/dibatalkan, job `schedule_cancelled` dikirim ke queue, dan worker mengirimkan email pemberitahuan pembatalan ke customer.
-- **Transporter**: Terintegrasi dengan **Nodemailer**. Mendukung konfigurasi real SMTP atau fallback otomatis ke *JSON/stream transport* pada mode development/testing tanpa memerlukan credential pihak ketiga.
+### D. Redis Caching System (`schedule-service`)
+- Menggunakan pola **Cache-Aside Pattern** berkecepatan tinggi via **Redis** (`ioredis`).
+- **Query Optimization**: Data query (`customers`, `doctors`, `schedules`, dan pencarian by ID) disimpan di Redis dengan TTL default 300 detik (5 menit).
+- **Cache Invalidation**: Setiap ada mutasi (`create`, `update`, `delete`), cache terkait otomatis dihapus (*purged*) secara presisi agar data tetap konsisten (*eventually consistent*).
+
+### E. Notification Microservice & Bull Queue (`notification-service`)
+- Beroperasi secara independen di **Port 3003** sebagai *Bull Queue Consumer*.
+- Mengambil job `schedule_created` dan `schedule_cancelled` dari antrean `mail_queue` di Redis.
+- Mengirimkan email responsif berbasis HTML dan teks menggunakan **Nodemailer** ke email customer (`teddy@test.com`).
+- Menyediakan riwayat pengiriman notifikasi yang dapat diinspeksi melalui GraphQL query `notificationLogs` dan health check `notificationHealth`.
 
 ---
 
-## 🔑 3. List Environment Variables
+## 📖 3. API Documentation & GraphQL Playground
+
+Seluruh microservice dilengkapi dengan **GraphQL Playground / Apollo Sandbox** yang memiliki dokumentasi skema lengkap, deskripsi tipe data (*ObjectType*), parameter input (*InputType*), argumen (*Args*), serta query dan mutasi dalam bahasa Indonesia dan Inggris.
+
+| Service | Port | GraphQL Playground URL | Health Check REST URL |
+| :--- | :---: | :--- | :--- |
+| **Auth Service** | `3001` | [http://localhost:3001/graphql](http://localhost:3001/graphql) | [http://localhost:3001/health](http://localhost:3001/health) |
+| **Schedule Service** | `3002` | [http://localhost:3002/graphql](http://localhost:3002/graphql) | [http://localhost:3002/health](http://localhost:3002/health) |
+| **Notification Service** | `3003` | [http://localhost:3003/graphql](http://localhost:3003/graphql) | [http://localhost:3003/health](http://localhost:3003/health) |
+
+Fitur GraphQL Introspection dan Playground aktif secara *out-of-the-box*, memungkinkan tim frontend atau penguji API melihat struktur field, dokumentasi parameter, dan melakukan *live query* langsung dari browser.
+
+---
+
+## 🔑 4. List Environment Variables
 
 Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Template tersedia di [`.env.example`](file:///.env.example).
 
@@ -94,14 +122,15 @@ Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Te
 | `POSTGRES_USER` | DB | `postgres` | Username database PostgreSQL. |
 | `POSTGRES_PASSWORD` | DB | `postgres` | **Sensitif**. Password database PostgreSQL. |
 | `POSTGRES_DB` | DB | `healthcare_db` | Database default saat PostgreSQL inisialisasi. |
-| `REDIS_HOST` | Queue | `redis` / `localhost` | Hostname Redis untuk Bull Queue. |
-| `REDIS_PORT` | Queue | `6379` | Port server Redis. |
+| `REDIS_HOST` | Queue & Cache | `redis` / `localhost` | Hostname Redis untuk Bull Queue & Caching. |
+| `REDIS_PORT` | Queue & Cache | `6379` | Port server Redis. |
 | `AUTH_SERVICE_PORT` | Auth | `3001` | Port aplikasi Auth Service. |
 | `JWT_SECRET` | Auth | *(Minimal 32 karakter)* | **Sangat Sensitif**. Kunci enkripsi untuk token JWT. |
 | `JWT_EXPIRES_IN` | Auth | `1d` | Masa aktif token JWT (contoh: `1d` = 24 jam). |
 | `SCHEDULE_SERVICE_PORT` | Schedule | `3002` | Port aplikasi Schedule Service. |
 | `AUTH_SERVICE_URL` | Schedule | `http://auth-service:3001` | URL Auth Service untuk validasi token antar service. |
-| `SMTP_HOST` | Mail | *(Opsional)* | Host server SMTP (kosongkan untuk test/JSON transport). |
+| `NOTIFICATION_SERVICE_PORT` | Notification | `3003` | Port aplikasi Notification Service. |
+| `SMTP_HOST` | Mail | *(Opsional)* | Host server SMTP (kosongkan untuk JSON fallback transporter). |
 | `SMTP_PORT` | Mail | `587` | Port server SMTP. |
 | `SMTP_USER` | Mail | *(Opsional)* | Username autentikasi SMTP. |
 | `SMTP_PASS` | Mail | *(Opsional)* | Password autentikasi SMTP. |
@@ -110,212 +139,32 @@ Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Te
 
 ---
 
-## 🚀 4. Cara Menjalankan Project
+## 🚀 5. Cara Menjalankan Project
 
-### Opsi A: Menggunakan Docker Compose (Direkomendasikan)
+### Opsi A: Menggunakan Docker Compose (Sangat Direkomendasikan)
 
-Perintah ini akan membangun dan menjalankan PostgreSQL, Auth Service (3001), dan Schedule Service (3002) secara otomatis:
+Perintah ini akan membangun dan menjalankan PostgreSQL, Redis, Auth Service (3001), Schedule Service (3002), dan Notification Service (3003) secara otomatis:
 
 ```bash
-# 1. Jalankan semua service dengan Docker Compose
-docker compose up -d --build
+# 1. Jalankan semua container di latar belakang
+sudo docker compose up -d --build
 
-# 2. Cek status container
-docker compose ps
+# 2. Periksa status seluruh container
+sudo docker compose ps
 ```
 
-**Port & URL yang Tersedia:**
-- **Auth Service GraphQL Playground**: [http://localhost:3001/graphql](http://localhost:3001/graphql)
-- **Schedule Service GraphQL Playground**: [http://localhost:3002/graphql](http://localhost:3002/graphql)
-- **Schedule Service Health Check**: [http://localhost:3002/health](http://localhost:3002/health)
-
----
-
-### Opsi B: Menjalankan Secara Lokal (Development Mode)
-
-Pastikan PostgreSQL aktif di port 5432:
-
-1. **Jalankan Auth Service (Port 3001):**
-   ```bash
-   cd auth-service
-   cp .env.example .env
-   npm run prisma:generate
-   npm run prisma:push
-   npm run start:dev
-   ```
-
-2. **Jalankan Schedule Service (Port 3002) di terminal terpisah:**
-   ```bash
-   cd schedule-service
-   cp .env.example .env
-   npm run prisma:generate
-   npm run prisma:push
-   npm run start:dev
-   ```
-
-3. **Menjalankan Automated Tests:**
-   ```bash
-   # Test Auth Service (46 tests)
-   cd auth-service && npm test
-
-   # Test Schedule Service (31 tests)
-   cd schedule-service && npm test
-   ```
-
----
-
-## 📡 5. Contoh GraphQL Queries & Mutations
-
-### A. Auth Service (`http://localhost:3001/graphql`)
-
-#### 1. Register & Login
-```graphql
-mutation RegisterUser {
-  register(input: {
-    email: "fajar@test.com"
-    password: "SecurePassword123!"
-  }) {
-    accessToken
-    user { id email }
-  }
-}
-```
-
----
-
-### B. Schedule Service (`http://localhost:3002/graphql`)
-> **Penting**: Semua request ke Schedule Service **harus menyertakan header HTTP**:  
-> `Authorization: Bearer <MASUKKAN_ACCESS_TOKEN_DARI_AUTH_SERVICE>`
-
-#### 1. Membuat Customer Baru
-```graphql
-mutation CreateCustomer {
-  createCustomer(input: {
-    name: "Teddy"
-    email: "teddy@test.com"
-  }) {
-    id
-    name
-    email
-    createdAt
-  }
-}
-```
-
-#### 2. Menampilkan Daftar Customer (Pagination)
-```graphql
-query GetCustomers {
-  customers(pagination: { skip: 0, take: 10 }) {
-    total
-    skip
-    take
-    items {
-      id
-      name
-      email
-    }
-  }
-}
-```
-
-#### 3. Membuat Dokter Baru
-```graphql
-mutation CreateDoctor {
-  createDoctor(input: {
-    name: "Doctor Lukman"
-  }) {
-    id
-    name
-    createdAt
-  }
-}
-```
-
-#### 4. Menampilkan Daftar Dokter (Pagination)
-```graphql
-query GetDoctors {
-  doctors(pagination: { skip: 0, take: 10 }) {
-    total
-    skip
-    take
-    items {
-      id
-      name
-    }
-  }
-}
-```
-
-#### 5. Membuat Jadwal Konsultasi Baru (`createSchedule`)
-```graphql
-mutation CreateSchedule {
-  createSchedule(input: {
-    objective: "Consultation between Doctor Lukman and Customer Teddy"
-    customerId: "<CUSTOMER_UUID>"
-    doctorId: "<DOCTOR_UUID>"
-    scheduledAt: "2026-12-01T09:00:00.000Z"
-  }) {
-    id
-    objective
-    scheduledAt
-    customer {
-      name
-      email
-    }
-    doctor {
-      name
-    }
-  }
-}
-```
-
-#### 6. Menguji Pencegahan Bentrok (*Conflict Prevention*)
-Jika Anda mengeksekusi mutasi jadwal di atas dengan `doctorId` dan `scheduledAt` yang sama:
-```json
-{
-  "errors": [
-    {
-      "message": "Doctor already has an appointment scheduled at 2026-12-01T09:00:00.000Z",
-      "extensions": {
-        "code": "CONFLICT"
-      }
-    }
-  ]
-}
-```
-
-#### 7. Menampilkan Daftar Jadwal dengan Filter & Pagination
-```graphql
-query GetFilteredSchedules {
-  schedules(
-    filter: {
-      doctorId: "<DOCTOR_UUID>"
-      startDate: "2026-12-01T00:00:00.000Z"
-      endDate: "2026-12-31T23:59:59.000Z"
-    }
-    pagination: { skip: 0, take: 10 }
-  ) {
-    total
-    items {
-      id
-      objective
-      scheduledAt
-      customer {
-        name
-      }
-      doctor {
-        name
-      }
-    }
-  }
-}
-```
+Container:
+- `healthcare_postgres` (PostgreSQL 16)
+- `healthcare_redis` (Redis 7)
+- `healthcare_auth_service` (Auth Service - Port 3001)
+- `healthcare_schedule_service` (Schedule Service - Port 3002)
+- `healthcare_notification_service` (Notification Service - Port 3003)
 
 ---
 
 ## 📬 6. Postman Collection
 
-File Postman Collection lengkap disediakan di:  
+File Postman Collection lengkap disediakan di root direktori:  
 [`Healthcare Scheduling System - Auth Service.postman_collection.json`](file:///Healthcare%20Scheduling%20System%20-%20Auth%20Service.postman_collection.json)
 
 ### Fitur Otomatisasi Postman:
@@ -323,7 +172,5 @@ File Postman Collection lengkap disediakan di:
 2. **Otomatisasi ID Relasi**:
    - Menjalankan `Create Customer` otomatis menyimpan ID ke `{{customer_id}}`.
    - Menjalankan `Create Doctor` otomatis menyimpan ID ke `{{doctor_id}}`.
-   - Menjalankan `Create Schedule` otomatis menggunakan `{{customer_id}}` dan `{{doctor_id}}` tanpa perlu copy-paste manual!
-3. **Pengujian Bentrok Terpasang**: Terdapat request *Create Conflicting Schedule* untuk membuktikan penolakan jadwal bentrok secara otomatis.
-
----
+   - Menjalankan `Create Schedule` otomatis menggunakan `{{customer_id}}` dan `{{doctor_id}}` tanpa perlu copy-paste manual.
+3. **Pengujian Bentrok Terpasang**: Terdapat request *Create Conflicting Schedule* untuk membuktikan penolakan jadwal bentrok secara otomatis (HTTP 409).

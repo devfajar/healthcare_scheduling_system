@@ -3,11 +3,14 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ScheduleService } from './schedule.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailProducerService } from '../mail/mail-producer.service';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
 
 describe('ScheduleService', () => {
   let service: ScheduleService;
   let prismaService: any;
   let mailProducerService: any;
+  let cacheService: any;
 
   const mockCustomer = {
     id: 'c1111111-1111-1111-1111-111111111111',
@@ -56,11 +59,19 @@ describe('ScheduleService', () => {
       queueScheduleCancelled: jest.fn().mockResolvedValue(undefined),
     };
 
+    cacheService = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      del: jest.fn().mockResolvedValue(undefined),
+      delByPattern: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ScheduleService,
         { provide: PrismaService, useValue: prismaService },
         { provide: MailProducerService, useValue: mailProducerService },
+        { provide: RedisCacheService, useValue: cacheService },
       ],
     }).compile();
 
@@ -68,7 +79,7 @@ describe('ScheduleService', () => {
   });
 
   describe('createSchedule', () => {
-    it('should successfully create schedule and enqueue confirmation email', async () => {
+    it('should successfully create schedule, invalidate cache, and enqueue email', async () => {
       prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
       prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
       // No conflict
@@ -96,6 +107,7 @@ describe('ScheduleService', () => {
           },
         },
       });
+      expect(cacheService.delByPattern).toHaveBeenCalledWith(`${CACHE_PREFIX.SCHEDULES_LIST}:*`);
       expect(result).toEqual(mockSchedule);
 
       // Verify email job is queued to Bull Queue
@@ -160,7 +172,24 @@ describe('ScheduleService', () => {
   });
 
   describe('schedules', () => {
-    it('should return paginated schedules list', async () => {
+    it('should return cached schedules if available (Cache Hit)', async () => {
+      const cachedData = {
+        items: [mockSchedule],
+        total: 1,
+        skip: 0,
+        take: 10,
+      };
+      cacheService.get.mockResolvedValue(cachedData);
+
+      const result = await service.schedules();
+
+      expect(result).toEqual(cachedData);
+      expect(cacheService.get).toHaveBeenCalledWith(`${CACHE_PREFIX.SCHEDULES_LIST}:all:all:all:all:0:10`);
+      expect(prismaService.schedule.findMany).not.toHaveBeenCalled();
+    });
+
+    it('should query DB and populate cache on Cache Miss', async () => {
+      cacheService.get.mockResolvedValue(null);
       prismaService.schedule.findMany.mockResolvedValue([mockSchedule]);
       prismaService.schedule.count.mockResolvedValue(1);
 
@@ -168,8 +197,11 @@ describe('ScheduleService', () => {
 
       expect(result.items).toHaveLength(1);
       expect(result.total).toBe(1);
-      expect(result.skip).toBe(0);
-      expect(result.take).toBe(10);
+      expect(cacheService.set).toHaveBeenCalledWith(
+        `${CACHE_PREFIX.SCHEDULES_LIST}:all:all:all:all:0:10`,
+        expect.objectContaining({ total: 1 }),
+        CACHE_TTL.SCHEDULES,
+      );
     });
 
     it('should apply doctor and customer filters when provided', async () => {
@@ -219,11 +251,26 @@ describe('ScheduleService', () => {
   });
 
   describe('schedule', () => {
-    it('should return schedule by ID', async () => {
+    it('should return cached schedule if available (Cache Hit)', async () => {
+      cacheService.get.mockResolvedValue(mockSchedule);
+
+      const result = await service.schedule(mockSchedule.id);
+      expect(result).toEqual(mockSchedule);
+      expect(cacheService.get).toHaveBeenCalledWith(`${CACHE_PREFIX.SCHEDULE}:${mockSchedule.id}`);
+      expect(prismaService.schedule.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('should query DB and store in cache on Cache Miss', async () => {
+      cacheService.get.mockResolvedValue(null);
       prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
 
       const result = await service.schedule(mockSchedule.id);
       expect(result).toEqual(mockSchedule);
+      expect(cacheService.set).toHaveBeenCalledWith(
+        `${CACHE_PREFIX.SCHEDULE}:${mockSchedule.id}`,
+        mockSchedule,
+        CACHE_TTL.SCHEDULE_DETAIL,
+      );
     });
 
     it('should throw NotFoundException when schedule is not found', async () => {
@@ -236,12 +283,14 @@ describe('ScheduleService', () => {
   });
 
   describe('deleteSchedule', () => {
-    it('should successfully delete schedule and enqueue cancellation email', async () => {
+    it('should successfully delete schedule, invalidate cache, and enqueue email', async () => {
       prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
       prismaService.schedule.delete.mockResolvedValue(mockSchedule);
 
       const result = await service.deleteSchedule(mockSchedule.id);
       expect(result).toEqual(mockSchedule);
+      expect(cacheService.delByPattern).toHaveBeenCalledWith(`${CACHE_PREFIX.SCHEDULES_LIST}:*`);
+      expect(cacheService.del).toHaveBeenCalledWith(`${CACHE_PREFIX.SCHEDULE}:${mockSchedule.id}`);
 
       // Verify cancellation email job is queued to Bull Queue
       expect(mailProducerService.queueScheduleCancelled).toHaveBeenCalledWith({

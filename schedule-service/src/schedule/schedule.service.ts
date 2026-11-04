@@ -4,8 +4,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailProducerService } from '../mail/mail-producer.service';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
 import { CreateScheduleInput } from './dto/create-schedule.input';
 import { ScheduleFilterInput } from './dto/schedule-filter.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -19,6 +22,7 @@ export class ScheduleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailProducerService: MailProducerService,
+    private readonly cacheService: RedisCacheService,
   ) {}
 
   /**
@@ -73,6 +77,9 @@ export class ScheduleService {
       },
     });
 
+    // Invalidate schedules cache immediately on booking
+    await this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`);
+
     this.logger.log(`Created schedule: ${schedule.id} for doctor ${schedule.doctorId}`);
 
     // Dispatch email notification to customer via Bull Queue
@@ -89,7 +96,8 @@ export class ScheduleService {
   }
 
   /**
-   * List schedules with optional filters and pagination
+   * List schedules with optional filters and pagination (Redis Cached for high-volume availability checks)
+   * High-traffic query: Cached for 60 seconds (rapid slot booking freshness)
    */
   async schedules(
     filter?: ScheduleFilterInput,
@@ -97,8 +105,17 @@ export class ScheduleService {
   ): Promise<SchedulePagination> {
     const skip = pagination?.skip ?? 0;
     const take = pagination?.take ?? 10;
+    const cacheKey = `${CACHE_PREFIX.SCHEDULES_LIST}:${filter?.doctorId || 'all'}:${filter?.customerId || 'all'}:${filter?.startDate || 'all'}:${filter?.endDate || 'all'}:${skip}:${take}`;
 
-    const where: any = {};
+    // 1. Try Cache Hit
+    const cached = await this.cacheService.get<SchedulePagination>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit for schedules: ${cacheKey}`);
+      return cached;
+    }
+
+    // 2. Cache Miss - Strongly typed Prisma query
+    const where: Prisma.ScheduleWhereInput = {};
 
     if (filter?.doctorId) {
       where.doctorId = filter.doctorId;
@@ -132,18 +149,32 @@ export class ScheduleService {
       this.prisma.schedule.count({ where }),
     ]);
 
-    return {
+    const result: SchedulePagination = {
       items,
       total,
       skip,
       take,
     };
+
+    // 3. Store in Redis Cache (TTL: 60 seconds)
+    await this.cacheService.set(cacheKey, result, CACHE_TTL.SCHEDULES);
+    return result;
   }
 
   /**
-   * Get single schedule by ID
+   * Get single schedule by ID (Redis Cached)
    */
   async schedule(id: string): Promise<Schedule> {
+    const cacheKey = `${CACHE_PREFIX.SCHEDULE}:${id}`;
+
+    // 1. Try Cache Hit
+    const cached = await this.cacheService.get<Schedule>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit for schedule: ${cacheKey}`);
+      return cached;
+    }
+
+    // 2. Cache Miss - Query Database
     const schedule = await this.prisma.schedule.findUnique({
       where: { id },
       include: {
@@ -156,6 +187,8 @@ export class ScheduleService {
       throw new NotFoundException(`Schedule with ID "${id}" not found`);
     }
 
+    // 3. Store in Redis Cache (TTL: 60 seconds)
+    await this.cacheService.set(cacheKey, schedule, CACHE_TTL.SCHEDULE_DETAIL);
     return schedule;
   }
 
@@ -182,6 +215,12 @@ export class ScheduleService {
         doctor: true,
       },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`),
+      this.cacheService.del(`${CACHE_PREFIX.SCHEDULE}:${id}`),
+    ]);
 
     // Dispatch cancellation email notification to customer via Bull Queue
     await this.mailProducerService.queueScheduleCancelled({

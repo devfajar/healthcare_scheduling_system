@@ -13,37 +13,52 @@ import { AuthGuard } from '../auth/auth.guard';
 export class DoctorResolver {
   constructor(private readonly doctorService: DoctorService) {}
 
-  @Mutation(() => Doctor, { description: 'Create a new doctor' })
+  @Mutation(() => Doctor, {
+    description: 'Mendaftarkan dokter baru ke dalam sistem jadwal dan menginvalidasi cache daftar dokter',
+  })
   async createDoctor(
-    @Args('input') input: CreateDoctorInput,
+    @Args('input', { description: 'Payload data dokter baru (nama lengkap beserta gelar)' })
+    input: CreateDoctorInput,
   ): Promise<Doctor> {
     return this.doctorService.createDoctor(input);
   }
 
-  @Mutation(() => Doctor, { description: 'Update doctor details' })
+  @Mutation(() => Doctor, {
+    description: 'Memperbarui informasi dokter berdasarkan ID UUID dan membersihkan cache terkait',
+  })
   async updateDoctor(
-    @Args('input') input: UpdateDoctorInput,
+    @Args('input', { description: 'Payload pembaruan data dokter (ID UUID dan nama baru)' })
+    input: UpdateDoctorInput,
   ): Promise<Doctor> {
     return this.doctorService.updateDoctor(input);
   }
 
-  @Query(() => DoctorPagination, { description: 'List doctors with pagination' })
+  @Query(() => DoctorPagination, {
+    description: 'Mengambil daftar dokter dengan dukungan paginasi dan optimasi Redis Caching',
+  })
   async doctors(
-    @Args('pagination', { nullable: true }) pagination?: PaginationInput,
+    @Args('pagination', { nullable: true, description: 'Parameter paginasi (skip & take)' })
+    pagination?: PaginationInput,
   ): Promise<DoctorPagination> {
     return this.doctorService.doctors(pagination);
   }
 
-  @Query(() => Doctor, { description: 'Get doctor by ID' })
+  @Query(() => Doctor, {
+    description: 'Mengambil informasi detail dokter berdasarkan ID UUID dengan optimasi Redis Caching',
+  })
   async doctor(
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID, description: 'ID unik dokter bertipe UUID' })
+    id: string,
   ): Promise<Doctor> {
     return this.doctorService.doctor(id);
   }
 
-  @Mutation(() => Doctor, { description: 'Delete doctor by ID' })
+  @Mutation(() => Doctor, {
+    description: 'Menghapus data dokter berdasarkan ID UUID dan menginvalidasi cache dokter',
+  })
   async deleteDoctor(
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID, description: 'ID unik dokter yang akan dihapus bertipe UUID' })
+    id: string,
   ): Promise<Doctor> {
     return this.doctorService.deleteDoctor(id);
   }

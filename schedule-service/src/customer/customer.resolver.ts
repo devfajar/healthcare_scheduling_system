@@ -13,37 +13,52 @@ import { AuthGuard } from '../auth/auth.guard';
 export class CustomerResolver {
   constructor(private readonly customerService: CustomerService) {}
 
-  @Mutation(() => Customer, { description: 'Create a new customer' })
+  @Mutation(() => Customer, {
+    description: 'Mendaftarkan data customer/pasien baru ke dalam sistem dengan validasi email unik dan invalidasi cache otomatis',
+  })
   async createCustomer(
-    @Args('input') input: CreateCustomerInput,
+    @Args('input', { description: 'Payload data customer baru (nama lengkap dan alamat email unik)' })
+    input: CreateCustomerInput,
   ): Promise<Customer> {
     return this.customerService.createCustomer(input);
   }
 
-  @Mutation(() => Customer, { description: 'Update customer details' })
+  @Mutation(() => Customer, {
+    description: 'Memperbarui data customer yang sudah ada berdasarkan UUID dengan invalidasi cache',
+  })
   async updateCustomer(
-    @Args('input') input: UpdateCustomerInput,
+    @Args('input', { description: 'Payload data pembaruan customer (ID UUID, nama baru, dan/atau email baru)' })
+    input: UpdateCustomerInput,
   ): Promise<Customer> {
     return this.customerService.updateCustomer(input);
   }
 
-  @Query(() => CustomerPagination, { description: 'List customers with pagination' })
+  @Query(() => CustomerPagination, {
+    description: 'Mengambil daftar customer terdaftar dengan dukungan paginasi (skip & take) dan optimasi Redis Caching',
+  })
   async customers(
-    @Args('pagination', { nullable: true }) pagination?: PaginationInput,
+    @Args('pagination', { nullable: true, description: 'Parameter paginasi (skip: offset data, take: jumlah data per halaman)' })
+    pagination?: PaginationInput,
   ): Promise<CustomerPagination> {
     return this.customerService.customers(pagination);
   }
 
-  @Query(() => Customer, { description: 'Get customer by ID' })
+  @Query(() => Customer, {
+    description: 'Mengambil detail data customer berdasarkan ID UUID spesifik dengan optimasi Redis Caching',
+  })
   async customer(
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID, description: 'ID unik customer bertipe UUID' })
+    id: string,
   ): Promise<Customer> {
     return this.customerService.customer(id);
   }
 
-  @Mutation(() => Customer, { description: 'Delete customer by ID' })
+  @Mutation(() => Customer, {
+    description: 'Menghapus data customer dari database berdasarkan ID UUID dan membersihkan cache terkait',
+  })
   async deleteCustomer(
-    @Args('id', { type: () => ID }) id: string,
+    @Args('id', { type: () => ID, description: 'ID unik customer yang akan dihapus bertipe UUID' })
+    id: string,
   ): Promise<Customer> {
     return this.customerService.deleteCustomer(id);
   }

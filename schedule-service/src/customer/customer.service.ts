@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
 import { CreateCustomerInput } from './dto/create-customer.input';
 import { UpdateCustomerInput } from './dto/update-customer.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -15,7 +17,10 @@ import { CustomerPagination } from './models/customer-pagination.model';
 export class CustomerService {
   private readonly logger = new Logger(CustomerService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: RedisCacheService,
+  ) {}
 
   /**
    * Create a new customer
@@ -37,6 +42,9 @@ export class CustomerService {
         email,
       },
     });
+
+    // Invalidate list caches
+    await this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
 
     this.logger.log(`Created customer: ${customer.id}`);
     return customer;
@@ -67,22 +75,39 @@ export class CustomerService {
       }
     }
 
-    return this.prisma.customer.update({
+    const updated = await this.prisma.customer.update({
       where: { id: input.id },
       data: {
         name: input.name ? input.name.trim() : existing.name,
         email,
       },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
+      this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${input.id}`),
+    ]);
+
+    return updated;
   }
 
   /**
-   * List customers with pagination
+   * List customers with pagination (Redis Cached)
    */
   async customers(pagination?: PaginationInput): Promise<CustomerPagination> {
     const skip = pagination?.skip ?? 0;
     const take = pagination?.take ?? 10;
+    const cacheKey = `${CACHE_PREFIX.CUSTOMERS_LIST}:${skip}:${take}`;
 
+    // 1. Try Cache Hit
+    const cached = await this.cacheService.get<CustomerPagination>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit for customers query: ${cacheKey}`);
+      return cached;
+    }
+
+    // 2. Cache Miss - Query Database
     const [items, total] = await Promise.all([
       this.prisma.customer.findMany({
         skip,
@@ -92,18 +117,32 @@ export class CustomerService {
       this.prisma.customer.count(),
     ]);
 
-    return {
+    const result: CustomerPagination = {
       items,
       total,
       skip,
       take,
     };
+
+    // 3. Store in Redis Cache (TTL: 300s)
+    await this.cacheService.set(cacheKey, result, CACHE_TTL.CUSTOMERS);
+    return result;
   }
 
   /**
-   * Get single customer by ID
+   * Get single customer by ID (Redis Cached)
    */
   async customer(id: string): Promise<Customer> {
+    const cacheKey = `${CACHE_PREFIX.CUSTOMER}:${id}`;
+
+    // 1. Try Cache Hit
+    const cached = await this.cacheService.get<Customer>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache hit for customer: ${cacheKey}`);
+      return cached;
+    }
+
+    // 2. Cache Miss - Query Database
     const customer = await this.prisma.customer.findUnique({
       where: { id },
     });
@@ -112,6 +151,8 @@ export class CustomerService {
       throw new NotFoundException(`Customer with ID "${id}" not found`);
     }
 
+    // 3. Store in Redis Cache (TTL: 300s)
+    await this.cacheService.set(cacheKey, customer, CACHE_TTL.CUSTOMER_DETAIL);
     return customer;
   }
 
@@ -127,8 +168,16 @@ export class CustomerService {
       throw new NotFoundException(`Customer with ID "${id}" not found`);
     }
 
-    return this.prisma.customer.delete({
+    const deleted = await this.prisma.customer.delete({
       where: { id },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
+      this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${id}`),
+    ]);
+
+    return deleted;
   }
 }
