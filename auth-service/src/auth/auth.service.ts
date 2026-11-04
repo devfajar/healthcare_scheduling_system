@@ -8,6 +8,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { isPrismaErrorWithCode } from '../common/prisma-error.util';
 import { RegisterInput } from './dto/register.input';
 import { LoginInput } from './dto/login.input';
 import { AuthPayload } from './models/auth-payload.model';
@@ -44,22 +45,30 @@ export class AuthService {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(input.password, saltRounds);
 
-    // Persist new user
-    const newUser = await this.prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-      },
-    });
+    try {
+      // Persist new user
+      const newUser = await this.prisma.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+        },
+      });
 
-    this.logger.log(`User registered successfully: ${newUser.id}`);
+      this.logger.log(`User registered successfully: ${newUser.id}`);
 
-    const accessToken = await this.generateToken(newUser.id, newUser.email);
+      const accessToken = await this.generateToken(newUser.id, newUser.email);
 
-    return {
-      accessToken,
-      user: this.sanitizeUser(newUser),
-    };
+      return {
+        accessToken,
+        user: this.sanitizeUser(newUser),
+      };
+    } catch (error: unknown) {
+      // Handle race condition: concurrent registration colliding on unique email
+      if (isPrismaErrorWithCode(error, 'P2002')) {
+        throw new ConflictException(`User with email "${email}" already exists`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -132,11 +141,12 @@ export class AuthService {
         user: this.sanitizeUser(user),
         message: 'Token is valid',
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Invalid or expired token';
       return {
         isValid: false,
         user: null,
-        message: error?.message || 'Invalid or expired token',
+        message,
       };
     }
   }

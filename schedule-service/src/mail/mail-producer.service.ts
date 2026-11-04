@@ -12,10 +12,12 @@ export class MailProducerService {
 
   /**
    * Queue email job when schedule is created
+   * Uses deterministic jobId for idempotency / deduplication
    */
   async queueScheduleCreated(payload: ScheduleEmailJobPayload): Promise<void> {
     try {
       const job = await this.mailQueue.add(SCHEDULE_CREATED_JOB, payload, {
+        jobId: `schedule-created-${payload.scheduleId}`,
         attempts: 3,
         backoff: {
           type: 'exponential',
@@ -28,20 +30,23 @@ export class MailProducerService {
       this.logger.log(
         `Enqueued "${SCHEDULE_CREATED_JOB}" job (ID: ${job.id}) for customer: ${payload.customerEmail}`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(
-        `Failed to enqueue "${SCHEDULE_CREATED_JOB}" job for customer ${payload.customerEmail}: ${error?.message || error}`,
-        error?.stack,
+        `Failed to enqueue "${SCHEDULE_CREATED_JOB}" job for customer ${payload.customerEmail}: ${err.message}`,
+        err.stack,
       );
     }
   }
 
   /**
    * Queue email job when schedule is cancelled / deleted
+   * Uses deterministic jobId for idempotency / deduplication
    */
   async queueScheduleCancelled(payload: ScheduleEmailJobPayload): Promise<void> {
     try {
       const job = await this.mailQueue.add(SCHEDULE_CANCELLED_JOB, payload, {
+        jobId: `schedule-cancelled-${payload.scheduleId}`,
         attempts: 3,
         backoff: {
           type: 'exponential',
@@ -54,10 +59,11 @@ export class MailProducerService {
       this.logger.log(
         `Enqueued "${SCHEDULE_CANCELLED_JOB}" job (ID: ${job.id}) for customer: ${payload.customerEmail}`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(
-        `Failed to enqueue "${SCHEDULE_CANCELLED_JOB}" job for customer ${payload.customerEmail}: ${error?.message || error}`,
-        error?.stack,
+        `Failed to enqueue "${SCHEDULE_CANCELLED_JOB}" job for customer ${payload.customerEmail}: ${err.message}`,
+        err.stack,
       );
     }
   }

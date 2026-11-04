@@ -40,13 +40,14 @@ describe('MailProducerService', () => {
   });
 
   describe('queueScheduleCreated', () => {
-    it('should add schedule created job to Bull queue with retry config', async () => {
+    it('should add schedule created job to Bull queue with retry config and deterministic jobId', async () => {
       await service.queueScheduleCreated(mockPayload);
 
       expect(mockQueue.add).toHaveBeenCalledWith(
         SCHEDULE_CREATED_JOB,
         mockPayload,
         expect.objectContaining({
+          jobId: `schedule-created-${mockPayload.scheduleId}`,
           attempts: 3,
           backoff: expect.objectContaining({ type: 'exponential', delay: 2000 }),
           removeOnComplete: true,
@@ -62,13 +63,14 @@ describe('MailProducerService', () => {
   });
 
   describe('queueScheduleCancelled', () => {
-    it('should add schedule cancelled job to Bull queue', async () => {
+    it('should add schedule cancelled job to Bull queue with deterministic jobId', async () => {
       await service.queueScheduleCancelled(mockPayload);
 
       expect(mockQueue.add).toHaveBeenCalledWith(
         SCHEDULE_CANCELLED_JOB,
         mockPayload,
         expect.objectContaining({
+          jobId: `schedule-cancelled-${mockPayload.scheduleId}`,
           attempts: 3,
           removeOnComplete: true,
         }),

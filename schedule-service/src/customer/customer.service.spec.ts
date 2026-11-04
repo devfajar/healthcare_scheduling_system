@@ -75,6 +75,21 @@ describe('CustomerService', () => {
         }),
       ).rejects.toThrow(ConflictException);
     });
+
+    it('should throw ConflictException when race condition triggers Prisma P2002 error on createCustomer', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(null);
+      prismaService.customer.create.mockRejectedValue({
+        code: 'P2002',
+        message: 'Unique constraint failed on the fields: (`email`)',
+      });
+
+      await expect(
+        service.createCustomer({
+          name: 'Teddy',
+          email: 'teddy@test.com',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
   });
 
   describe('updateCustomer', () => {
@@ -102,6 +117,36 @@ describe('CustomerService', () => {
         service.updateCustomer({
           id: 'non-existent-id',
           name: 'Teddy',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ConflictException when race condition triggers Prisma P2002 on updateCustomer', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
+      prismaService.customer.update.mockRejectedValue({
+        code: 'P2002',
+        message: 'Unique constraint failed on the fields: (`email`)',
+      });
+
+      await expect(
+        service.updateCustomer({
+          id: mockCustomer.id,
+          email: 'concurrent@test.com',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2025 on updateCustomer', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
+      prismaService.customer.update.mockRejectedValue({
+        code: 'P2025',
+        message: 'Record not found',
+      });
+
+      await expect(
+        service.updateCustomer({
+          id: mockCustomer.id,
+          name: 'Concurrent Update',
         }),
       ).rejects.toThrow(NotFoundException);
     });
@@ -189,6 +234,18 @@ describe('CustomerService', () => {
       prismaService.customer.findUnique.mockResolvedValue(null);
 
       await expect(service.deleteCustomer('unknown-id')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2025 on deleteCustomer', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
+      prismaService.customer.delete.mockRejectedValue({
+        code: 'P2025',
+        message: 'Record not found',
+      });
+
+      await expect(service.deleteCustomer(mockCustomer.id)).rejects.toThrow(
         NotFoundException,
       );
     });

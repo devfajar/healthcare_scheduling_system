@@ -11,7 +11,7 @@ Sistem ini terdiri dari 3 microservice utama dan 2 infrastruktur pendukung yang 
 
 ---
 
-## 🏛️ 1. Arsitektur Sistem & Alur Kerja
+##  1. Arsitektur Sistem & Alur Kerja
 
 ```mermaid
 flowchart TD
@@ -55,7 +55,7 @@ flowchart TD
 
 ---
 
-## 🔐 2. Ringkasan Modul & Fitur Sistem
+##  2. Ringkasan Modul & Fitur Sistem
 
 ### A. Customer Module (`schedule-service`)
 - `createCustomer(input)`: Membuat customer baru (nama dan email unik). Menginvalidasi cache daftar customer.
@@ -94,7 +94,7 @@ flowchart TD
 
 ---
 
-## 📖 3. API Documentation & GraphQL Playground
+## 3. API Documentation & GraphQL Playground
 
 Seluruh microservice dilengkapi dengan **GraphQL Playground / Apollo Sandbox** yang memiliki dokumentasi skema lengkap, deskripsi tipe data (*ObjectType*), parameter input (*InputType*), argumen (*Args*), serta query dan mutasi dalam bahasa Indonesia dan Inggris.
 
@@ -108,7 +108,7 @@ Fitur GraphQL Introspection dan Playground aktif secara *out-of-the-box*, memung
 
 ---
 
-## 🔑 4. List Environment Variables
+## 4. List Environment Variables
 
 Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Template tersedia di [`.env.example`](file:///.env.example).
 
@@ -134,7 +134,7 @@ Semua data sensitif disimpan di file `.env` dan dilindungi oleh `.gitignore`. Te
 
 ---
 
-## 🚀 5. Cara Menjalankan Project
+## 5. Cara Menjalankan Project
 
 ### Opsi A: Menggunakan Docker Compose (Sangat Direkomendasikan)
 
@@ -157,7 +157,7 @@ Container:
 
 ---
 
-## 📬 6. Postman Collection
+## 6. Postman Collection
 
 File Postman Collection lengkap disediakan di root direktori:  
 [`Healthcare Scheduling System - Auth Service.postman_collection.json`](file:///Healthcare%20Scheduling%20System%20-%20Auth%20Service.postman_collection.json)

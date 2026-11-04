@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
+import { isPrismaErrorWithCode } from '../common/prisma-error.util';
 import { CreateDoctorInput } from './dto/create-doctor.input';
 import { UpdateDoctorInput } from './dto/update-doctor.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -50,20 +51,27 @@ export class DoctorService {
       throw new NotFoundException(`Doctor with ID "${input.id}" not found`);
     }
 
-    const updated = await this.prisma.doctor.update({
-      where: { id: input.id },
-      data: {
-        name: input.name ? input.name.trim() : existing.name,
-      },
-    });
+    try {
+      const updated = await this.prisma.doctor.update({
+        where: { id: input.id },
+        data: {
+          name: input.name ? input.name.trim() : existing.name,
+        },
+      });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.delByPattern(`${CACHE_PREFIX.DOCTORS_LIST}:*`),
-      this.cacheService.del(`${CACHE_PREFIX.DOCTOR}:${input.id}`),
-    ]);
+      // Invalidate caches
+      await Promise.all([
+        this.cacheService.delByPattern(`${CACHE_PREFIX.DOCTORS_LIST}:*`),
+        this.cacheService.del(`${CACHE_PREFIX.DOCTOR}:${input.id}`),
+      ]);
 
-    return updated;
+      return updated;
+    } catch (error: unknown) {
+      if (isPrismaErrorWithCode(error, 'P2025')) {
+        throw new NotFoundException(`Doctor with ID "${input.id}" not found`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -143,16 +151,23 @@ export class DoctorService {
       throw new NotFoundException(`Doctor with ID "${id}" not found`);
     }
 
-    const deleted = await this.prisma.doctor.delete({
-      where: { id },
-    });
+    try {
+      const deleted = await this.prisma.doctor.delete({
+        where: { id },
+      });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.delByPattern(`${CACHE_PREFIX.DOCTORS_LIST}:*`),
-      this.cacheService.del(`${CACHE_PREFIX.DOCTOR}:${id}`),
-    ]);
+      // Invalidate caches
+      await Promise.all([
+        this.cacheService.delByPattern(`${CACHE_PREFIX.DOCTORS_LIST}:*`),
+        this.cacheService.del(`${CACHE_PREFIX.DOCTOR}:${id}`),
+      ]);
 
-    return deleted;
+      return deleted;
+    } catch (error: unknown) {
+      if (isPrismaErrorWithCode(error, 'P2025')) {
+        throw new NotFoundException(`Doctor with ID "${id}" not found`);
+      }
+      throw error;
+    }
   }
 }

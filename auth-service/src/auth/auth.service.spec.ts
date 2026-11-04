@@ -106,6 +106,21 @@ describe('AuthService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
+    it('should throw ConflictException when race condition triggers Prisma P2002 error on user create', async () => {
+      prismaService.user.findUnique.mockResolvedValue(null);
+      prismaService.user.create.mockRejectedValue({
+        code: 'P2002',
+        message: 'Unique constraint failed on the fields: (`email`)',
+      });
+
+      await expect(
+        authService.register({
+          email: 'fajar@test.com',
+          password: 'Password123!',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
     it.each([
       'notanemail',
       'user@',

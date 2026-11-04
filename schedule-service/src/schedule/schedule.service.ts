@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailProducerService } from '../mail/mail-producer.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
+import { isPrismaErrorWithCode } from '../common/prisma-error.util';
 import { CreateScheduleInput } from './dto/create-schedule.input';
 import { ScheduleFilterInput } from './dto/schedule-filter.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -64,35 +65,49 @@ export class ScheduleService {
     }
 
     // 4. Create and return schedule with customer & doctor relations
-    const schedule = await this.prisma.schedule.create({
-      data: {
-        objective: input.objective.trim(),
-        customerId: input.customerId,
-        doctorId: input.doctorId,
-        scheduledAt: scheduledDate,
-      },
-      include: {
-        customer: true,
-        doctor: true,
-      },
-    });
+    try {
+      const schedule = await this.prisma.schedule.create({
+        data: {
+          objective: input.objective.trim(),
+          customerId: input.customerId,
+          doctorId: input.doctorId,
+          scheduledAt: scheduledDate,
+        },
+        include: {
+          customer: true,
+          doctor: true,
+        },
+      });
 
-    // Invalidate schedules cache immediately on booking
-    await this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`);
+      // Invalidate schedules cache immediately on booking
+      await this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`);
 
-    this.logger.log(`Created schedule: ${schedule.id} for doctor ${schedule.doctorId}`);
+      this.logger.log(`Created schedule: ${schedule.id} for doctor ${schedule.doctorId}`);
 
-    // Dispatch email notification to customer via Bull Queue
-    await this.mailProducerService.queueScheduleCreated({
-      scheduleId: schedule.id,
-      customerName: schedule.customer.name,
-      customerEmail: schedule.customer.email,
-      doctorName: schedule.doctor.name,
-      scheduledAt: schedule.scheduledAt,
-      objective: schedule.objective,
-    });
+      // Dispatch email notification to customer via Bull Queue
+      await this.mailProducerService.queueScheduleCreated({
+        scheduleId: schedule.id,
+        customerName: schedule.customer.name,
+        customerEmail: schedule.customer.email,
+        doctorName: schedule.doctor.name,
+        scheduledAt: schedule.scheduledAt,
+        objective: schedule.objective,
+      });
 
-    return schedule;
+      return schedule;
+    } catch (error: unknown) {
+      // Handle race condition: concurrent insert colliding on doctor_schedule_unique constraint
+      if (isPrismaErrorWithCode(error, 'P2002')) {
+        throw new ConflictException(
+          `Doctor already has an appointment scheduled at ${scheduledDate.toISOString()}`,
+        );
+      }
+      // Handle race condition: customer or doctor deleted concurrently
+      if (isPrismaErrorWithCode(error, 'P2003')) {
+        throw new NotFoundException('Customer or Doctor referenced in schedule no longer exists');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -208,30 +223,38 @@ export class ScheduleService {
       throw new NotFoundException(`Schedule with ID "${id}" not found`);
     }
 
-    const deleted = await this.prisma.schedule.delete({
-      where: { id },
-      include: {
-        customer: true,
-        doctor: true,
-      },
-    });
+    try {
+      const deleted = await this.prisma.schedule.delete({
+        where: { id },
+        include: {
+          customer: true,
+          doctor: true,
+        },
+      });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`),
-      this.cacheService.del(`${CACHE_PREFIX.SCHEDULE}:${id}`),
-    ]);
+      // Invalidate caches
+      await Promise.all([
+        this.cacheService.delByPattern(`${CACHE_PREFIX.SCHEDULES_LIST}:*`),
+        this.cacheService.del(`${CACHE_PREFIX.SCHEDULE}:${id}`),
+      ]);
 
-    // Dispatch cancellation email notification to customer via Bull Queue
-    await this.mailProducerService.queueScheduleCancelled({
-      scheduleId: deleted.id,
-      customerName: deleted.customer.name,
-      customerEmail: deleted.customer.email,
-      doctorName: deleted.doctor.name,
-      scheduledAt: deleted.scheduledAt,
-      objective: deleted.objective,
-    });
+      // Dispatch cancellation email notification to customer via Bull Queue
+      await this.mailProducerService.queueScheduleCancelled({
+        scheduleId: deleted.id,
+        customerName: deleted.customer.name,
+        customerEmail: deleted.customer.email,
+        doctorName: deleted.doctor.name,
+        scheduledAt: deleted.scheduledAt,
+        objective: deleted.objective,
+      });
 
-    return deleted;
+      return deleted;
+    } catch (error: unknown) {
+      // Handle race condition: schedule deleted concurrently by another request
+      if (isPrismaErrorWithCode(error, 'P2025')) {
+        throw new NotFoundException(`Schedule with ID "${id}" not found`);
+      }
+      throw error;
+    }
   }
 }

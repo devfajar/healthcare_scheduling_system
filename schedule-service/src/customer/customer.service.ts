@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { CACHE_PREFIX, CACHE_TTL } from '../cache/cache.constants';
+import { isPrismaErrorWithCode } from '../common/prisma-error.util';
 import { CreateCustomerInput } from './dto/create-customer.input';
 import { UpdateCustomerInput } from './dto/update-customer.input';
 import { PaginationInput } from '../common/dto/pagination.input';
@@ -36,18 +37,26 @@ export class CustomerService {
       throw new ConflictException(`Customer with email "${email}" already exists`);
     }
 
-    const customer = await this.prisma.customer.create({
-      data: {
-        name: input.name.trim(),
-        email,
-      },
-    });
+    try {
+      const customer = await this.prisma.customer.create({
+        data: {
+          name: input.name.trim(),
+          email,
+        },
+      });
 
-    // Invalidate list caches
-    await this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
+      // Invalidate list caches
+      await this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`);
 
-    this.logger.log(`Created customer: ${customer.id}`);
-    return customer;
+      this.logger.log(`Created customer: ${customer.id}`);
+      return customer;
+    } catch (error: unknown) {
+      // Handle race condition: concurrent registration colliding on unique email
+      if (isPrismaErrorWithCode(error, 'P2002')) {
+        throw new ConflictException(`Customer with email "${email}" already exists`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -75,21 +84,33 @@ export class CustomerService {
       }
     }
 
-    const updated = await this.prisma.customer.update({
-      where: { id: input.id },
-      data: {
-        name: input.name ? input.name.trim() : existing.name,
-        email,
-      },
-    });
+    try {
+      const updated = await this.prisma.customer.update({
+        where: { id: input.id },
+        data: {
+          name: input.name ? input.name.trim() : existing.name,
+          email,
+        },
+      });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
-      this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${input.id}`),
-    ]);
+      // Invalidate caches
+      await Promise.all([
+        this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
+        this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${input.id}`),
+      ]);
 
-    return updated;
+      return updated;
+    } catch (error: unknown) {
+      // Handle race condition: concurrent update colliding on unique email
+      if (isPrismaErrorWithCode(error, 'P2002')) {
+        throw new ConflictException(`Customer with email "${email}" already exists`);
+      }
+      // Handle race condition: customer deleted concurrently
+      if (isPrismaErrorWithCode(error, 'P2025')) {
+        throw new NotFoundException(`Customer with ID "${input.id}" not found`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -168,16 +189,24 @@ export class CustomerService {
       throw new NotFoundException(`Customer with ID "${id}" not found`);
     }
 
-    const deleted = await this.prisma.customer.delete({
-      where: { id },
-    });
+    try {
+      const deleted = await this.prisma.customer.delete({
+        where: { id },
+      });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
-      this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${id}`),
-    ]);
+      // Invalidate caches
+      await Promise.all([
+        this.cacheService.delByPattern(`${CACHE_PREFIX.CUSTOMERS_LIST}:*`),
+        this.cacheService.del(`${CACHE_PREFIX.CUSTOMER}:${id}`),
+      ]);
 
-    return deleted;
+      return deleted;
+    } catch (error: unknown) {
+      // Handle race condition: customer deleted concurrently
+      if (isPrismaErrorWithCode(error, 'P2025')) {
+        throw new NotFoundException(`Customer with ID "${id}" not found`);
+      }
+      throw error;
+    }
   }
 }

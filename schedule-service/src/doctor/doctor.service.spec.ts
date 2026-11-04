@@ -95,6 +95,21 @@ describe('DoctorService', () => {
         }),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2025 on updateDoctor', async () => {
+      prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
+      prismaService.doctor.update.mockRejectedValue({
+        code: 'P2025',
+        message: 'Record not found',
+      });
+
+      await expect(
+        service.updateDoctor({
+          id: mockDoctor.id,
+          name: 'Concurrent Doctor Update',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 
   describe('doctors', () => {
@@ -179,6 +194,18 @@ describe('DoctorService', () => {
       prismaService.doctor.findUnique.mockResolvedValue(null);
 
       await expect(service.deleteDoctor('unknown-doctor')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2025 on deleteDoctor', async () => {
+      prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
+      prismaService.doctor.delete.mockRejectedValue({
+        code: 'P2025',
+        message: 'Record not found',
+      });
+
+      await expect(service.deleteDoctor(mockDoctor.id)).rejects.toThrow(
         NotFoundException,
       );
     });

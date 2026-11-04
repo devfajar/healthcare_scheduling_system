@@ -169,6 +169,51 @@ describe('ScheduleService', () => {
 
       expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
     });
+
+    it('should throw ConflictException when race condition triggers Prisma P2002 unique constraint error on insert', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
+      prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
+      // findUnique passes for both concurrent requests
+      prismaService.schedule.findUnique.mockResolvedValue(null);
+      // But concurrent insert triggers DB unique constraint violation
+      prismaService.schedule.create.mockRejectedValue({
+        code: 'P2002',
+        message: 'Unique constraint failed on the fields: (`doctorId`,`scheduledAt`)',
+      });
+
+      await expect(
+        service.createSchedule({
+          objective: 'Concurrent booking attempt',
+          customerId: mockCustomer.id,
+          doctorId: mockDoctor.id,
+          scheduledAt: scheduledDate,
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2003 foreign key error on insert', async () => {
+      prismaService.customer.findUnique.mockResolvedValue(mockCustomer);
+      prismaService.doctor.findUnique.mockResolvedValue(mockDoctor);
+      prismaService.schedule.findUnique.mockResolvedValue(null);
+      // Concurrent deletion of doctor or customer triggers foreign key error
+      prismaService.schedule.create.mockRejectedValue({
+        code: 'P2003',
+        message: 'Foreign key constraint failed on the field: `doctorId`',
+      });
+
+      await expect(
+        service.createSchedule({
+          objective: 'Concurrent booking attempt',
+          customerId: mockCustomer.id,
+          doctorId: mockDoctor.id,
+          scheduledAt: scheduledDate,
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mailProducerService.queueScheduleCreated).not.toHaveBeenCalled();
+    });
   });
 
   describe('schedules', () => {
@@ -307,6 +352,22 @@ describe('ScheduleService', () => {
       prismaService.schedule.findUnique.mockResolvedValue(null);
 
       await expect(service.deleteSchedule('non-existent-id')).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(mailProducerService.queueScheduleCancelled).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when race condition triggers Prisma P2025 record not found on delete', async () => {
+      // Passes initial check
+      prismaService.schedule.findUnique.mockResolvedValue(mockSchedule);
+      // But concurrent delete deleted it first
+      prismaService.schedule.delete.mockRejectedValue({
+        code: 'P2025',
+        message: 'An operation failed because it depends on one or more records that were required but not found.',
+      });
+
+      await expect(service.deleteSchedule(mockSchedule.id)).rejects.toThrow(
         NotFoundException,
       );
 
